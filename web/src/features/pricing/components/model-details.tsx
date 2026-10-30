@@ -1003,6 +1003,27 @@ function GroupPricingSection(props: GroupPricingSectionProps) {
   if (!variants?.length) {
     return <ProviderGroupPricingSection {...props} />
   }
+  // 只有一个上游插件时，用 tab 展示插件名没有意义：直接铺开该上游的分组定价。
+  // 只有同一模型被多个插件声明（真正需要切换）时才保留 tab。
+  if (variants.length === 1) {
+    const only = variants[0]
+    if (!only.billing_expr && only.billing_mode !== 'ratio') {
+      return (
+        <section>
+          <SectionTitle>{t('Pricing by Group')}</SectionTitle>
+          <UnconfiguredTaskPricingNotice
+            model={withPluginPricing(props.model, only)}
+          />
+        </section>
+      )
+    }
+    return (
+      <ProviderGroupPricingSection
+        {...props}
+        model={withPluginPricing(props.model, only)}
+      />
+    )
+  }
   return (
     <section>
       <SectionTitle>{t('Pricing by Group')}</SectionTitle>
