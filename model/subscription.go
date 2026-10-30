@@ -566,7 +566,9 @@ func refreshSubscriptionUserGroupCache(userId int, operation string) {
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
 // expectedPaymentProvider guards against cross-gateway callback attacks (empty skips the check).
 // actualPaymentMethod updates the order's PaymentMethod to reflect the real payment type used (empty skips update).
-func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string) error {
+// paidMoney 为已验签回调中的实付金额；nil 表示该支付渠道不提供金额校验。
+// 金额与订单不符时只把订单标记为 amount_mismatch（不发货、也不判失败），等待人工核对。
+func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string, paidMoney *string) error {
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
@@ -579,6 +581,8 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	var logMoney float64
 	var logPaymentMethod string
 	var upgradeGroup string
+	var amountMismatch bool
+	var expectedMoney string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
@@ -590,8 +594,17 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if order.Status == common.TopUpStatusSuccess {
 			return nil
 		}
-		if order.Status != common.TopUpStatusPending {
+		if order.Status != common.TopUpStatusPending && order.Status != common.TopUpStatusAmountMismatch {
 			return ErrSubscriptionOrderStatusInvalid
+		}
+		if paidMoney != nil && !paidMoneyMatches(order.Money, *paidMoney) {
+			order.Status = common.TopUpStatusAmountMismatch
+			if err := tx.Save(&order).Error; err != nil {
+				return err
+			}
+			amountMismatch = true
+			expectedMoney = strconv.FormatFloat(order.Money, 'f', 2, 64)
+			return nil
 		}
 		plan, err := GetSubscriptionPlanById(order.PlanId)
 		if err != nil {
@@ -635,6 +648,10 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	})
 	if err != nil {
 		return err
+	}
+	if amountMismatch {
+		common.SysLog(common.LogText("Epay paid amount mismatch, order marked trade_no=%s expected_money=%s paid_money=%q", tradeNo, expectedMoney, *paidMoney))
+		return ErrPaidAmountMismatch
 	}
 	if upgradeGroup != "" && logUserId > 0 {
 		refreshSubscriptionUserGroupCache(logUserId, common.LogText("subscription payment completion"))

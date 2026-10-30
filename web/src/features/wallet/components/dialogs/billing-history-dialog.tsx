@@ -266,7 +266,9 @@ export function BillingHistoryDialog({
                       </div>
 
                       {/* Admin Actions */}
-                      {isAdmin && record.status === 'pending' && (
+                      {isAdmin &&
+                        (record.status === 'pending' ||
+                          record.status === 'amount_mismatch') && (
                         <div className='mt-4 flex justify-end'>
                           <Button
                             size='sm'

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -157,10 +159,22 @@ func SubscriptionEpayNotify(c *gin.Context) {
 		return
 	}
 
+	// 验签只证明回调来自持有商户密钥的一方，结算前再向网关确认一次支付状态。
+	if !confirmEpayOrderPaid(c.Request.Context(), verifyInfo.ServiceTradeNo) {
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
 
-	if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type); err != nil {
+	if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type, &verifyInfo.Money); err != nil {
+		if errors.Is(err, model.ErrPaidAmountMismatch) {
+			// 金额不符只标记订单，既不发货也不判失败，等待人工核对。
+			logger.LogWarn(c.Request.Context(), common.LogText("Epay callback amount mismatch, order marked trade_no=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP()))
+			_, _ = c.Writer.Write([]byte("success"))
+			return
+		}
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
@@ -207,9 +221,19 @@ func SubscriptionEpayReturn(c *gin.Context) {
 		return
 	}
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
+		// 浏览器返回页同样可能被重放，结算前向网关确认一次支付状态。
+		if !confirmEpayOrderPaid(c.Request.Context(), verifyInfo.ServiceTradeNo) {
+			c.Redirect(http.StatusFound, paymentReturnPath("/wallet?pay=pending"))
+			return
+		}
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type); err != nil {
+		if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type, &verifyInfo.Money); err != nil {
+			if errors.Is(err, model.ErrPaidAmountMismatch) {
+				logger.LogWarn(c.Request.Context(), common.LogText("Epay callback amount mismatch, order marked trade_no=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP()))
+				c.Redirect(http.StatusFound, paymentReturnPath("/wallet?pay=pending"))
+				return
+			}
 			c.Redirect(http.StatusFound, paymentReturnPath("/wallet?pay=fail"))
 			return
 		}

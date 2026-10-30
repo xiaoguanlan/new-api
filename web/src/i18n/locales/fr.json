@@ -513,6 +513,7 @@
     "Amount cannot be changed when editing.": "Le montant ne peut pas être modifié lors de la modification.",
     "Amount discount": "Remise sur le montant",
     "Amount Due": "Montant dû",
+    "Amount mismatch": "Montant incorrect",
     "Amount must be a whole number": "Le montant doit être un nombre entier",
     "Amount must be greater than 0": "Le montant doit être supérieur à 0",
     "Amount of quota to credit to user account.": "Montant du quota à créditer sur le compte utilisateur.",

@@ -513,6 +513,7 @@
     "Amount cannot be changed when editing.": "Количество нельзя изменить при редактировании.",
     "Amount discount": "Скидка на сумму",
     "Amount Due": "Сумма к оплате",
+    "Amount mismatch": "Сумма не совпадает",
     "Amount must be a whole number": "Сумма должна быть целым числом",
     "Amount must be greater than 0": "Сумма должна быть больше 0",
     "Amount of quota to credit to user account.": "Количество квоты для зачисления на счет пользователя.",

@@ -46,6 +46,10 @@ export const STATUS_CONFIG: Record<TopupStatus, StatusConfig> = {
     variant: 'danger',
     label: 'Expired',
   },
+  amount_mismatch: {
+    variant: 'danger',
+    label: 'Amount mismatch',
+  },
 }
 
 /**

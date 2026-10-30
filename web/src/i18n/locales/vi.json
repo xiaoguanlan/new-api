@@ -513,6 +513,7 @@
     "Amount cannot be changed when editing.": "Số tiền không thể thay đổi khi chỉnh sửa.",
     "Amount discount": "Số tiền giảm giá",
     "Amount Due": "Số tiền cần thanh toán",
+    "Amount mismatch": "Số tiền không khớp",
     "Amount must be a whole number": "Số tiền phải là số nguyên",
     "Amount must be greater than 0": "Số tiền phải lớn hơn 0",
     "Amount of quota to credit to user account.": "Số lượng quota để ghi có vào tài khoản người dùng.",

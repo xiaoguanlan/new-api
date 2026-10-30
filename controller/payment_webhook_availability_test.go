@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -282,4 +284,113 @@ func TestEpayCallbacksVerifyBeforeSettlement(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestConfirmEpayOrderPaid(t *testing.T) {
+	originalPayAddress := operation_setting.PayAddress
+	originalEpayID := operation_setting.EpayId
+	originalEpayKey := operation_setting.EpayKey
+	t.Cleanup(func() {
+		operation_setting.PayAddress = originalPayAddress
+		operation_setting.EpayId = originalEpayID
+		operation_setting.EpayKey = originalEpayKey
+	})
+	operation_setting.EpayId = "epay_id"
+	operation_setting.EpayKey = "test-key"
+
+	cases := []struct {
+		name       string
+		statusCode int
+		body       string
+		want       bool
+	}{
+		{"paid", http.StatusOK, `{"code":1,"msg":"ok","out_trade_no":"order","trade_status":"TRADE_SUCCESS"}`, true},
+		{"finished", http.StatusOK, `{"code":1,"out_trade_no":"order","trade_status":"trade_finished"}`, true},
+		{"waiting for payment", http.StatusOK, `{"code":1,"out_trade_no":"order","trade_status":"WAIT_BUYER_PAY"}`, false},
+		{"closed", http.StatusOK, `{"code":1,"out_trade_no":"order","trade_status":"TRADE_CLOSED"}`, false},
+		{"unknown status keeps signed callback", http.StatusOK, `{"code":1,"out_trade_no":"order","trade_status":"PAYING"}`, true},
+		{"order not found keeps signed callback", http.StatusOK, `{"code":0,"msg":"查询失败"}`, true},
+		{"gateway error keeps signed callback", http.StatusInternalServerError, `internal error`, true},
+		{"unparsable response keeps signed callback", http.StatusOK, `<html>maintenance</html>`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery url.Values
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.Query()
+				w.WriteHeader(tc.statusCode)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			operation_setting.PayAddress = server.URL
+
+			require.Equal(t, tc.want, confirmEpayOrderPaid(context.Background(), "order"))
+			assert.Equal(t, "order", gotQuery.Get("act"))
+			assert.Equal(t, "epay_id", gotQuery.Get("pid"))
+			assert.Equal(t, "test-key", gotQuery.Get("key"))
+			assert.Equal(t, "order", gotQuery.Get("out_trade_no"))
+		})
+	}
+
+	t.Run("gateway unreachable keeps signed callback", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		operation_setting.PayAddress = server.URL
+		server.Close()
+		require.True(t, confirmEpayOrderPaid(context.Background(), "order"))
+	})
+}
+
+func TestEpaySuccessCallbackRequiresGatewayConfirmation(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalPayAddress := operation_setting.PayAddress
+	originalEpayID := operation_setting.EpayId
+	originalEpayKey := operation_setting.EpayKey
+	originalPayMethods := operation_setting.PayMethods
+	originalServerAddress := system_setting.ServerAddress
+	originalDB := model.DB
+	t.Cleanup(func() {
+		operation_setting.PayAddress = originalPayAddress
+		operation_setting.EpayId = originalEpayID
+		operation_setting.EpayKey = originalEpayKey
+		operation_setting.PayMethods = originalPayMethods
+		system_setting.ServerAddress = originalServerAddress
+		model.DB = originalDB
+	})
+	operation_setting.EpayId = "epay_id"
+	operation_setting.EpayKey = "test-key"
+	operation_setting.PayMethods = []map[string]string{{"type": "alipay"}}
+	system_setting.ServerAddress = "https://dashboard.example.com"
+	// 网关查询显示未支付时不允许结算；nil 数据库让任何结算尝试直接失败。
+	model.DB = nil
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"code":1,"out_trade_no":"order","trade_status":"WAIT_BUYER_PAY"}`)
+	}))
+	defer server.Close()
+	operation_setting.PayAddress = server.URL
+
+	sign := epay.MD5String("money=1.00&name=item&out_trade_no=order&pid=epay_id&trade_status=TRADE_SUCCESS&type=alipay", "test-key")
+	params := url.Values{
+		"pid": {"epay_id"}, "type": {"alipay"}, "money": {"1.00"},
+		"name": {"item"}, "out_trade_no": {"order"},
+		"trade_status": {"TRADE_SUCCESS"}, "sign_type": {"MD5"}, "sign": {sign},
+	}
+
+	router := gin.New()
+	router.Any("/api/user/epay/notify", EpayNotify)
+	router.Any("/api/subscription/epay/notify", SubscriptionEpayNotify)
+	router.Any("/api/subscription/epay/return", SubscriptionEpayReturn)
+
+	for _, path := range []string{"/api/user/epay/notify", "/api/subscription/epay/notify"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path+"?"+params.Encode(), nil)
+		require.NotPanics(t, func() { router.ServeHTTP(recorder, request) })
+		assert.Equal(t, "fail", recorder.Body.String())
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/subscription/epay/return?"+params.Encode(), nil)
+	require.NotPanics(t, func() { router.ServeHTTP(recorder, request) })
+	assert.Equal(t, http.StatusFound, recorder.Code)
+	assert.Equal(t, "https://dashboard.example.com/wallet?pay=pending", recorder.Header().Get("Location"))
 }
