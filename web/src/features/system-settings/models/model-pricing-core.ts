@@ -35,7 +35,10 @@ import {
 } from '@/features/pricing/lib/billing-expr'
 import { formatBillingCondition } from '@/features/pricing/lib/billing-expression/condition-display'
 import { compileBillingExpression } from '@/features/pricing/lib/billing-expression/parser'
-import type { BillingUsageSchema } from '@/features/pricing/types'
+import type {
+  BillingUsageSchema,
+  ModelUsageHidden,
+} from '@/features/pricing/types'
 
 import { formatPricingNumber } from './pricing-format'
 
@@ -68,6 +71,7 @@ export type LaneKey =
 
 export type ModelRatioData = {
   pluginBillingExpr?: Record<string, string>
+  pluginUsageHidden?: Record<string, ModelUsageHidden>
   name: string
   price?: string
   ratio?: string

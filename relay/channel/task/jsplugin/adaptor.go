@@ -32,6 +32,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -1686,6 +1687,15 @@ func (a *TaskAdaptor) validatedUsageRatios(facts map[string]any, models ...strin
 			number, err := validateUsageValue(value, schema)
 			if err != nil {
 				return nil, nil, err
+			}
+			if len(schema.Enum) > 0 {
+				// A hidden or deleted enum value stays in the plugin schema but is
+				// no longer priced, so the request must fail before pre-consume
+				// instead of falling through to another tier.
+				if text, ok := value.(string); ok &&
+					billing_setting.UsageHiddenModels(a.plugin.Meta.Key, models, key, text) != "" {
+					return nil, nil, fmt.Errorf("usage value %q for %q is disabled", text, key)
+				}
 			}
 			if schema.Type == "number" {
 				validated[key] = number

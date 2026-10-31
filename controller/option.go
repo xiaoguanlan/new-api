@@ -380,6 +380,32 @@ func UpdateOption(c *gin.Context) {
 				return
 			}
 		}
+	case billing_setting.PluginUsageHiddenOption:
+		var hidden map[string]any
+		if err = common.UnmarshalJsonStr(option.Value.(string), &hidden); err != nil || hidden == nil {
+			common.ApiErrorMsg(c, "plugin usage hidden values must be a JSON object")
+			return
+		}
+		byModel := make(map[string]map[string]any)
+		for key, fields := range hidden {
+			plugin, name, valid := billing_setting.SplitPluginBillingExprKey(key)
+			if !valid {
+				common.ApiErrorMsg(c, "invalid plugin usage hidden key: "+key)
+				return
+			}
+			if byModel[name] == nil {
+				byModel[name] = make(map[string]any)
+			}
+			byModel[name][plugin] = fields
+		}
+		for name, pluginFields := range byModel {
+			if err = model.ValidateModelPricing(name, model.PricingValues{
+				billing_setting.PluginUsageHiddenOption: pluginFields,
+			}); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
 	case "console_setting.api_info":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "ApiInfo")
 		if err != nil {

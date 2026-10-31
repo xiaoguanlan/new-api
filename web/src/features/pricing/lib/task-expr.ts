@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import type {
   BillingUsageExample,
   BillingUsageFieldSchema,
+  BillingUsageHiddenState,
   BillingUsageSchema,
+  ModelUsageHidden,
 } from '../types'
 import {
   parseTaskTiersFromExpr,
@@ -140,6 +142,84 @@ export function taskMatrixRowLabel(
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([, value]) => value)
   return values.length > 0 ? values.join('·') : 'base'
+}
+
+export type TaskRowVisibility = 'visible' | BillingUsageHiddenState
+
+export function setTaskUsageHiddenValue(
+  hidden: ModelUsageHidden | undefined,
+  field: string,
+  value: string,
+  state: BillingUsageHiddenState | null
+): ModelUsageHidden {
+  const next: ModelUsageHidden = {}
+  for (const [name, values] of Object.entries(hidden ?? {})) {
+    next[name] = { ...values }
+  }
+  if (state === null) {
+    const values = next[field]
+    if (values) {
+      delete values[value]
+      if (Object.keys(values).length === 0) delete next[field]
+    }
+    return next
+  }
+  next[field] = { ...next[field], [value]: state }
+  return next
+}
+
+// A combination is disabled when any of its values is disabled; hidden rows
+// stay editable but reject requests, deleted rows disappear from the table.
+export function taskMatrixRowVisibility(
+  row: TaskMatrixRow,
+  hidden: ModelUsageHidden | undefined
+): TaskRowVisibility {
+  let visibility: TaskRowVisibility = 'visible'
+  for (const [field, value] of Object.entries(row.combination)) {
+    const state = hidden?.[field]?.[value]
+    if (state === 'deleted') return 'deleted'
+    if (state === 'hidden') visibility = 'hidden'
+  }
+  return visibility
+}
+
+export function taskMatrixHasVisibleRow(
+  rows: TaskMatrixRow[],
+  hidden: ModelUsageHidden | undefined
+): boolean {
+  return rows.some((row) => taskMatrixRowVisibility(row, hidden) === 'visible')
+}
+
+export function setTaskMatrixRowHiddenState(
+  hidden: ModelUsageHidden | undefined,
+  row: TaskMatrixRow,
+  state: BillingUsageHiddenState | null
+): ModelUsageHidden {
+  let next = hidden ?? {}
+  for (const [field, value] of Object.entries(row.combination)) {
+    next = setTaskUsageHiddenValue(next, field, value, state)
+  }
+  return next
+}
+
+// The final tier is the unconditioned fallback and its price is published as
+// the base price. Keep a visible row there so a hidden row's price is never
+// shown as the default.
+export function orderTaskMatrixRowsForPublish(
+  rows: TaskMatrixRow[],
+  hidden: ModelUsageHidden | undefined
+): TaskMatrixRow[] {
+  let fallbackIndex = -1
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (taskMatrixRowVisibility(rows[index], hidden) === 'visible') {
+      fallbackIndex = index
+      break
+    }
+  }
+  if (fallbackIndex < 0 || fallbackIndex === rows.length - 1) return rows
+  const reordered = rows.filter((_, index) => index !== fallbackIndex)
+  reordered.push(rows[fallbackIndex])
+  return reordered
 }
 
 export function taskMatrixToTiers(

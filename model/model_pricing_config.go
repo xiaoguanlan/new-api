@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -47,10 +48,14 @@ type ModelPricingPluginVariant struct {
 	Icon          string                               `json:"icon,omitempty"`
 	UsageSchema   map[string]jsplugin.UsageFieldSchema `json:"usage_schema"`
 	UsageExamples []jsplugin.UsageExample              `json:"usage_examples,omitempty"`
-	Configured    string                               `json:"configured"`
-	Effective     string                               `json:"effective"`
-	Compatible    bool                                 `json:"compatible"`
-	Stale         bool                                 `json:"stale,omitempty"`
+	UsageHidden   map[string]map[string]string         `json:"usage_hidden,omitempty"`
+	// NoConstantCharge reports that the plugin bills only metered usage, so the
+	// pricing editor hides its fixed charge column.
+	NoConstantCharge bool   `json:"no_constant_charge,omitempty"`
+	Configured       string `json:"configured"`
+	Effective        string `json:"effective"`
+	Compatible       bool   `json:"compatible"`
+	Stale            bool   `json:"stale,omitempty"`
 }
 
 type ModelPricingSnapshot struct {
@@ -66,7 +71,16 @@ var ErrModelPricingConflict = errors.New("model pricing changed; reload before s
 var modelPricingOptionKeys = []string{
 	"AudioCompletionRatio", "AudioRatio", "CacheRatio", "CompletionRatio",
 	"CreateCacheRatio", "ImageRatio", "ModelPrice", "ModelRatio",
-	"billing_setting.billing_expr", "billing_setting.billing_mode", billing_setting.PluginBillingExprOption,
+	"billing_setting.billing_expr", "billing_setting.billing_mode",
+	billing_setting.PluginBillingExprOption, billing_setting.PluginUsageHiddenOption,
+}
+
+// isPluginScopedPricingOption reports whether an option stores one entry per
+// plugin and model ("plugin::model") but is edited as a plugin → value object
+// inside one model's draft.
+func isPluginScopedPricingOption(key string) bool {
+	return key == billing_setting.PluginBillingExprOption ||
+		key == billing_setting.PluginUsageHiddenOption
 }
 
 var modelPricingMutationMu sync.Mutex
@@ -125,11 +139,11 @@ func readModelPricingMaps(db *gorm.DB) (map[string]map[string]any, map[string]bo
 func modelPricingValues(values map[string]map[string]any, name string) PricingValues {
 	result := make(PricingValues)
 	for _, key := range modelPricingOptionKeys {
-		if key == billing_setting.PluginBillingExprOption {
+		if isPluginScopedPricingOption(key) {
 			variants := make(map[string]any)
-			for variant, expression := range values[key] {
+			for variant, value := range values[key] {
 				if plugin, model, ok := billing_setting.SplitPluginBillingExprKey(variant); ok && model == name {
-					variants[plugin] = expression
+					variants[plugin] = value
 				}
 			}
 			if len(variants) > 0 {
@@ -144,19 +158,48 @@ func modelPricingValues(values map[string]map[string]any, name string) PricingVa
 	return result
 }
 
+// usageHiddenForPlugin extracts one plugin's field → value → state map from a
+// model draft. The draft stores the option as a plugin-keyed object.
+func usageHiddenForPlugin(hidden map[string]any, pluginKey string) map[string]map[string]string {
+	fields, _ := hidden[pluginKey].(map[string]any)
+	if len(fields) == 0 {
+		return nil
+	}
+	result := make(map[string]map[string]string, len(fields))
+	for field, valuesValue := range fields {
+		values, _ := valuesValue.(map[string]any)
+		if len(values) == 0 {
+			continue
+		}
+		states := make(map[string]string, len(values))
+		for value, stateValue := range values {
+			if state, ok := stateValue.(string); ok {
+				states[value] = state
+			}
+		}
+		if len(states) > 0 {
+			result[field] = states
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 // replaceModelPricing writes one complete model draft into the option maps.
 // Plugin expressions are grouped in the draft and flattened only in storage.
 func replaceModelPricing(values map[string]map[string]any, name string, draft PricingValues) {
 	for _, key := range modelPricingOptionKeys {
-		if key == billing_setting.PluginBillingExprOption {
+		if isPluginScopedPricingOption(key) {
 			for variant := range values[key] {
 				if _, model, ok := billing_setting.SplitPluginBillingExprKey(variant); ok && model == name {
 					delete(values[key], variant)
 				}
 			}
 			variants, _ := draft[key].(map[string]any)
-			for plugin, expr := range variants {
-				values[key][billing_setting.PluginBillingExprKey(plugin, name)] = expr
+			for plugin, value := range variants {
+				values[key][billing_setting.PluginBillingExprKey(plugin, name)] = value
 			}
 			continue
 		}
@@ -245,7 +288,7 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 		nameSet := make(map[string]bool)
 		for key, entries := range values {
 			for name := range entries {
-				if key == billing_setting.PluginBillingExprOption {
+				if isPluginScopedPricingOption(key) {
 					_, model, ok := billing_setting.SplitPluginBillingExprKey(name)
 					if !ok {
 						continue
@@ -280,6 +323,7 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 		}
 		plugins := generation.PluginsByModel(name)
 		configuredVariants, _ := configured[billing_setting.PluginBillingExprOption].(map[string]any)
+		configuredHidden, _ := configured[billing_setting.PluginUsageHiddenOption].(map[string]any)
 		if len(plugins) > 0 || len(configuredVariants) > 0 {
 			keys := make(map[string]bool, len(plugins)+len(configuredVariants))
 			for _, plugin := range plugins {
@@ -296,9 +340,11 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 					variant := ModelPricingPluginVariant{
 						PluginKey: key, PluginName: key, Configured: configuredExpr,
 						UsageSchema: map[string]jsplugin.UsageFieldSchema{}, Stale: true,
+						UsageHidden: usageHiddenForPlugin(configuredHidden, key),
 					}
 					if exists {
 						variant.PluginName, variant.Icon = plugin.Meta.Name, plugin.Meta.Icon
+						variant.NoConstantCharge = plugin.Meta.NoConstantCharge
 					}
 					entry.PluginVariants = append(entry.PluginVariants, variant)
 					continue
@@ -314,7 +360,9 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 				entry.PluginVariants = append(entry.PluginVariants, ModelPricingPluginVariant{
 					PluginKey: plugin.Meta.Key, PluginName: plugin.Meta.Name, Icon: plugin.Meta.Icon,
 					UsageSchema: schema, UsageExamples: examples, Configured: configuredExpr, Effective: expression,
-					Compatible: billing_setting.TaskExprCompatible(expression, schema),
+					UsageHidden:      usageHiddenForPlugin(configuredHidden, plugin.Meta.Key),
+					NoConstantCharge: plugin.Meta.NoConstantCharge,
+					Compatible:       billing_setting.TaskExprCompatible(expression, schema),
 				})
 			}
 		}
@@ -346,16 +394,71 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 
 func ValidateModelPricing(name string, values PricingValues) error {
 	variants := make(map[string]any)
+	hiddenByPlugin := make(map[string]any)
+	for key, usageHidden := range billing_setting.GetPluginUsageHiddenCopy() {
+		if plugin, model, ok := billing_setting.SplitPluginBillingExprKey(key); ok && model == name {
+			hiddenByPlugin[plugin] = usageHidden
+		}
+	}
 	for key, expression := range billing_setting.GetPluginBillingExprCopy() {
 		if plugin, model, ok := billing_setting.SplitPluginBillingExprKey(key); ok && model == name {
 			variants[plugin] = expression
 		}
 	}
-	previous := PricingValues{billing_setting.PluginBillingExprOption: variants}
+	previous := PricingValues{
+		billing_setting.PluginBillingExprOption: variants,
+		billing_setting.PluginUsageHiddenOption: hiddenByPlugin,
+	}
 	if expression, ok := billing_setting.GetBillingExpr(name); ok {
 		previous["billing_setting.billing_expr"] = expression
 	}
 	return validateModelPricing(name, values, previous)
+}
+
+// validatePluginUsageHidden checks that every disabled usage value is an enum
+// value the plugin declares for this model, and that the state is one the
+// relay understands. An unchanged entry for a plugin that no longer declares
+// the model stays saveable so other prices can still be edited.
+func validatePluginUsageHidden(name string, value any, previous map[string]any, generation *jsplugin.RoutingGeneration) error {
+	hidden, ok := value.(map[string]any)
+	if !ok || hidden == nil {
+		return errors.New("plugin usage hidden values must be a plugin-keyed object")
+	}
+	for pluginKey, fieldsValue := range hidden {
+		fields, ok := fieldsValue.(map[string]any)
+		if !ok || fields == nil {
+			return fmt.Errorf("model %s: plugin %s: hidden values must map usage fields to values", name, pluginKey)
+		}
+		plugin, exists := generation.Get(pluginKey)
+		declared := exists && slices.Contains(plugin.Meta.Models, name)
+		if !declared {
+			if reflect.DeepEqual(previous[pluginKey], fieldsValue) {
+				continue
+			}
+			return fmt.Errorf("model %s: plugin %s does not declare this model", name, pluginKey)
+		}
+		schema, _ := plugin.Meta.UsageForModel(name)
+		for field, statesValue := range fields {
+			definition, declaredField := schema[field]
+			if !declaredField || len(definition.Enum) == 0 {
+				return fmt.Errorf("model %s: plugin %s: usage field %s is not an enum", name, pluginKey, field)
+			}
+			states, ok := statesValue.(map[string]any)
+			if !ok || states == nil {
+				return fmt.Errorf("model %s: plugin %s: usage field %s: hidden values must be an object", name, pluginKey, field)
+			}
+			for usageValue, stateValue := range states {
+				if !slices.Contains(definition.Enum, usageValue) {
+					return fmt.Errorf("model %s: plugin %s: usage field %s: %q is not a declared value", name, pluginKey, field, usageValue)
+				}
+				state, ok := stateValue.(string)
+				if !ok || !billing_setting.ValidUsageHiddenState(state) {
+					return fmt.Errorf("model %s: plugin %s: usage field %s: %q has an invalid state", name, pluginKey, field, usageValue)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // Writes pass the locked database snapshot here, so allowing an unchanged stale
@@ -396,8 +499,15 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 			}
 		}
 	}
+	previousHidden, _ := previous[billing_setting.PluginUsageHiddenOption].(map[string]any)
 	for key, value := range values {
 		if key == billing_setting.PluginBillingExprOption {
+			continue
+		}
+		if key == billing_setting.PluginUsageHiddenOption {
+			if err := validatePluginUsageHidden(name, value, previousHidden, generation); err != nil {
+				return err
+			}
 			continue
 		}
 		if !IsModelPricingOption(key) {
@@ -524,10 +634,10 @@ func UpdateModelPricingOptions(updates map[string]string) error {
 			}
 			for _, entriesForKey := range []map[string]any{values[key], entries} {
 				for name := range entriesForKey {
-					if key == billing_setting.PluginBillingExprOption {
+					if isPluginScopedPricingOption(key) {
 						_, model, ok := billing_setting.SplitPluginBillingExprKey(name)
 						if !ok {
-							return fmt.Errorf("invalid plugin billing expression key: %s", name)
+							return fmt.Errorf("invalid plugin-scoped pricing key: %s", name)
 						}
 						name = model
 					}

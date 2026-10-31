@@ -207,6 +207,18 @@ func TestComfyUIWorkflowFamilies(t *testing.T) {
 				"prompt": "sing", "resolution": "768p竖",
 			},
 		},
+		{
+			// u22 takes up to nine images and three audios; upstream allows seed 0.
+			name:   "u22 reference images and audio",
+			model:  "minimax_h3_zm_u22",
+			action: "image_to_video",
+			request: mergeValues(refImages(2), refAudios(1), map[string]any{
+				"prompt": "dance", "seconds": 6, "resolution": "480p横", "seed": 0,
+			}),
+			want: mergeValues(refImages(2), refAudios(1), map[string]any{
+				"prompt": "dance", "duration": float64(6), "resolution": "480p横", "seed": float64(0),
+			}),
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -248,6 +260,8 @@ func TestComfyUIDurationBoundsFollowWorkflow(t *testing.T) {
 		{"minimax_h3_b99_003_12s", "seconds", 15, false},
 		{"minimax_h3_b99_003_12s", "seconds", 16, true},
 		{"minimax_h3_805", "seconds", 16, true},
+		{"minimax_h3_zm_u22", "seconds", 15, false},
+		{"minimax_h3_zm_u22", "seconds", 16, true},
 		{"minimax_h3_image_audio_to_video", "audio_duration", 11, false},
 		{"minimax_h3_image_audio_to_video", "audio_duration", 16, true},
 	}
@@ -283,6 +297,7 @@ func TestComfyUIRequiresWorkflowInputs(t *testing.T) {
 
 	require.Error(t, submit("minimax_h3_b99_002", map[string]any{"prompt": "x", "first_frame": reference}), "last_frame")
 	require.Error(t, submit("minimax_h3_801", map[string]any{"prompt": "x"}), "ref_image_0")
+	require.Error(t, submit("minimax_h3_zm_u22", map[string]any{"prompt": "x"}), "ref_image_0")
 	require.Error(t, submit("minimax_h3_z0903", map[string]any{"prompt": "x", "ref_image_0": reference}), "ref_audio_0")
 	require.Error(t, submit("minimax_h3_image_audio_to_video", map[string]any{"ref_image_0": reference}), "ref_audio_0")
 	require.Error(t, submit(comfyRetargetingModel, map[string]any{"ref_image": reference}), "ref_video")
@@ -301,7 +316,7 @@ func TestComfyUIResolutionFactsUseTiers(t *testing.T) {
 	decode := comfyDecode(t, plugin, "minimax_h3_801", map[string]any{"prompt": "x", "resolution": "1080p竖"})
 	body := decode["requestBody"].(map[string]any)
 	assert.Equal(t, "1088p竖(1088*1920)", body["resolution"], "the nearest supported tier is sent")
-	assert.Equal(t, map[string]any{"seconds": float64(5), "resolution": "1088p"}, comfyUsage(t, plugin, "minimax_h3_801", body))
+	assert.Equal(t, map[string]any{"seconds": float64(5), "resolution": "1088p", "media_inputs": float64(0)}, comfyUsage(t, plugin, "minimax_h3_801", body))
 
 	defaulted := comfyDecode(t, plugin, "minimax_h3_801", map[string]any{"prompt": "x"})
 	defaultBody := defaulted["requestBody"].(map[string]any)
@@ -333,6 +348,19 @@ func TestComfyUITaskResultStatusMapping(t *testing.T) {
 		wantURL    string
 	}{
 		{"queued", map[string]any{"code": "Success", "data": map[string]any{"status": "QUEUED"}}, "QUEUED", ""},
+		{
+			// The vendor reports a lowercase "completed" with a results array.
+			"completed",
+			map[string]any{"msg": "", "code": "Success", "data": map[string]any{
+				"status": "completed",
+				"results": []any{map[string]any{
+					"url": "https://cdn.example/out.mp4", "type": "video", "file_type": "mp4", "output_type": "output",
+				}},
+				"task_id":   "671ce5ca-80b3-4a18-8b5c-af6013f0f03d",
+				"client_id": "158a0bba46b6a42f9b175ecdeaea2ac4",
+			}},
+			"SUCCESS", "https://cdn.example/out.mp4",
+		},
 		{"running", map[string]any{"code": "Success", "data": map[string]any{"status": "RUNNING"}}, "IN_PROGRESS", ""},
 		{
 			"success",
@@ -403,14 +431,57 @@ func TestComfyUIUsageFacts(t *testing.T) {
 	video := comfyUsage(t, plugin, comfyVideoModel, map[string]any{
 		"prompt": "a cat", "duration": 6, "resolution": "480p竖",
 	})
-	assert.Equal(t, map[string]any{"seconds": float64(6), "resolution": "480p"}, video)
+	assert.Equal(t, map[string]any{"seconds": float64(6), "resolution": "480p", "media_inputs": float64(0)}, video)
+
+	// Every image, audio, and video the client supplies costs one media input,
+	// including the first one.
+	withMedia := mergeValues(refImages(2), refAudios(1), map[string]any{
+		"prompt": "dance", "duration": 5, "resolution": "768p横(1376*768)",
+	})
+	released := comfyUsage(t, plugin, "minimax_h3_803", withMedia)
+	assert.Equal(t, map[string]any{"seconds": float64(5), "resolution": "768p", "media_inputs": float64(3)}, released)
+
+	// u22 accepts up to nine reference images and three reference audios.
+	u22 := comfyUsage(t, plugin, "minimax_h3_zm_u22", mergeValues(refImages(2), refAudios(1), map[string]any{
+		"prompt": "dance", "duration": 6, "resolution": "480p横",
+	}))
+	assert.Equal(t, map[string]any{"seconds": float64(6), "resolution": "480p", "media_inputs": float64(3)}, u22)
+
+	// The OpenAI reference image becomes the workflow's first image input, so
+	// it counts once.
+	mapped := comfyDecode(t, plugin, "minimax_h3_lightx2v_v5", map[string]any{
+		"prompt": "walk", "input_reference": "https://cdn.example/reference.png",
+	})
+	mappedFacts := comfyUsage(t, plugin, "minimax_h3_lightx2v_v5", mapped["requestBody"].(map[string]any))
+	assert.Equal(t, float64(1), mappedFacts["media_inputs"])
+
+	// Empty optional media inputs are not sent upstream and are not charged.
+	empty := comfyUsage(t, plugin, "minimax_h3_803", map[string]any{
+		"prompt": "dance", "resolution": "768p竖", "ref_audio_0": "", "ref_image_0": "  ",
+	})
+	assert.Equal(t, float64(0), empty["media_inputs"])
+
+	// Retargeting sends an image and a video.
+	retargeting := comfyUsage(t, plugin, comfyRetargetingModel, map[string]any{
+		"ref_image": "https://cdn.example/reference.png",
+		"ref_video": "https://cdn.example/motion.mp4",
+	})
+	assert.Equal(t, float64(2), retargeting["media_inputs"])
 
 	// Speech is reserved by an estimate of the spoken length, since AutoDL
-	// reports the audio duration only in the finished file.
+	// reports the audio duration only in the finished file. Its voice
+	// reference is a media input.
 	tts := comfyUsage(t, plugin, comfyTTSModel, map[string]any{
 		"prompt_text": "一二三四五六七八九", "prompt_simple": "https://cdn.example/ref.wav",
 	})
-	assert.Equal(t, map[string]any{"seconds": float64(2)}, tts)
+	assert.Equal(t, map[string]any{"seconds": float64(2), "media_inputs": float64(1)}, tts)
+
+	ttsEmotion := comfyUsage(t, plugin, comfyTTSModel, map[string]any{
+		"prompt_text":   "一二三四五六七八九",
+		"prompt_simple": "https://cdn.example/ref.wav",
+		"emo_ref_audio": "https://cdn.example/emotion.wav",
+	})
+	assert.Equal(t, map[string]any{"seconds": float64(2), "media_inputs": float64(2)}, ttsEmotion)
 }
 
 // Retargeting follows the reference video, so it reserves its longest clip and
@@ -422,7 +493,7 @@ func TestComfyUIRetargetingSettlesOnMeasuredVideo(t *testing.T) {
 		"ref_image": "https://cdn.example/reference.png",
 		"ref_video": "https://cdn.example/motion.mp4",
 	})
-	assert.Equal(t, map[string]any{"seconds": float64(15)}, reserved)
+	assert.Equal(t, map[string]any{"seconds": float64(15), "media_inputs": float64(2)}, reserved)
 
 	facts := callComfy(t, plugin, []string{"extractUsageOnComplete"}, map[string]any{
 		"model":         comfyRetargetingModel,
@@ -561,4 +632,34 @@ func TestComfyUIMeasuresMediaDuration(t *testing.T) {
 		result := parseComfyWithMedia(t, plugin, comfyTTSModel, "audio", nil, nil)
 		assert.Nil(t, result["state"], "no measurement yields no override")
 	})
+}
+
+func TestComfyUIBillsOnlyMeteredUsage(t *testing.T) {
+	plugin := newComfyPlugin(t)
+	assert.True(t, plugin.Meta.NoConstantCharge)
+	schema, _ := plugin.Meta.UsageForModel(comfyVideoModel)
+	assert.Equal(t, "second", schema["seconds"].Unit)
+	assert.Equal(t, "count", schema["media_inputs"].Unit)
+}
+
+func TestComfyUIu22UsesWorkflowSubmitAndResultUrls(t *testing.T) {
+	plugin := newComfyPlugin(t)
+	const model = "minimax_h3_zm_u22"
+	submit := callComfy(t, plugin, []string{"buildSubmitRequest"}, map[string]any{
+		"baseUrl":       "https://autodl.art",
+		"apiKey":        "token-under-test",
+		"model":         model,
+		"upstreamModel": model,
+		"requestBody":   map[string]any{"prompt": "x", "ref_image_0": "https://cdn.example/ref.png"},
+	})
+	assert.Equal(t, "https://autodl.art/api/v1/comfyui/comfyui_workflow/minimax_h3_zm_u22", submit["url"])
+	assert.Equal(t, "POST", submit["method"])
+
+	query := callComfy(t, plugin, []string{"buildQueryRequest"}, map[string]any{
+		"baseUrl": "https://autodl.art",
+		"apiKey":  "token-under-test",
+		"taskId":  "671ce5ca-80b3-4a18-8b5c-af6013f0f03d",
+	})
+	assert.Equal(t, "https://autodl.art/api/v1/comfyui/comfyui_workflow/result/671ce5ca-80b3-4a18-8b5c-af6013f0f03d", query["url"])
+	assert.Equal(t, "GET", query["method"])
 }

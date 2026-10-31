@@ -17,7 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { splitBillingExprAndRequestRules } from '@/features/pricing/lib/billing-expr'
-import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing'
+import {
+  normalizeUsageHidden,
+  splitPluginBillingExprKey,
+} from '@/features/pricing/lib/plugin-pricing'
+import type { ModelUsageHidden } from '@/features/pricing/types'
 
 import { safeJsonParse } from '../utils/json-parser'
 import { formatPricingNumber } from './pricing-format'
@@ -34,10 +38,12 @@ export type ModelPricingSnapshotInput = {
   billingMode: string
   billingExpr: string
   pluginBillingExpr?: string
+  pluginUsageHidden?: string
 }
 
 export type ModelPricingSnapshot = {
   pluginBillingExpr?: Record<string, string>
+  pluginUsageHidden?: Record<string, ModelUsageHidden>
   name: string
   price?: string
   ratio?: string
@@ -167,6 +173,7 @@ export const buildModelSnapshots = ({
   billingMode,
   billingExpr,
   pluginBillingExpr = '{}',
+  pluginUsageHidden = '{}',
 }: ModelPricingSnapshotInput): ModelPricingSnapshot[] => {
   const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
     fallback: {},
@@ -223,8 +230,26 @@ export const buildModelSnapshots = ({
       [plugin]: expression,
     })
   }
+  const pluginHiddenMap = safeJsonParse<Record<string, ModelUsageHidden>>(
+    pluginUsageHidden,
+    { fallback: {}, context: 'plugin usage hidden values' }
+  )
+  const pluginHiddenByModel = new Map<
+    string,
+    Record<string, ModelUsageHidden>
+  >()
+  for (const [key, hidden] of Object.entries(pluginHiddenMap)) {
+    const parts = splitPluginBillingExprKey(key)
+    if (!parts || hidden === null || typeof hidden !== 'object') continue
+    const [plugin, model] = parts
+    pluginHiddenByModel.set(model, {
+      ...pluginHiddenByModel.get(model),
+      [plugin]: normalizeUsageHidden(hidden),
+    })
+  }
   const modelNames = new Set([
     ...pluginExpressionsByModel.keys(),
+    ...pluginHiddenByModel.keys(),
     ...Object.keys(priceMap),
     ...Object.keys(ratioMap),
     ...Object.keys(cacheMap),
@@ -255,6 +280,7 @@ export const buildModelSnapshots = ({
       return {
         name,
         pluginBillingExpr: pluginExpressionsByModel.get(name),
+        pluginUsageHidden: pluginHiddenByModel.get(name),
         billingMode: 'tiered_expr',
         billingExpr: pureExpr,
         requestRuleExpr,
@@ -273,6 +299,7 @@ export const buildModelSnapshots = ({
     return {
       name,
       pluginBillingExpr: pluginExpressionsByModel.get(name),
+      pluginUsageHidden: pluginHiddenByModel.get(name),
       price,
       ratio,
       cacheRatio: cache,
@@ -312,5 +339,8 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     pluginBillingExpr: Object.entries(snapshot.pluginBillingExpr ?? {}).sort(
       ([a], [b]) => a.localeCompare(b)
     ),
+    pluginUsageHidden: Object.entries(snapshot.pluginUsageHidden ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([plugin, hidden]) => [plugin, normalizeUsageHidden(hidden)]),
   })
 }

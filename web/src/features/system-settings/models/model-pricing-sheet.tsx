@@ -80,12 +80,18 @@ import {
 import { PricingCurrencySelector } from '@/features/model-pricing/pricing-currency-selector'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
-import { pluginExpressionsEqual } from '@/features/pricing/lib/plugin-pricing'
+import {
+  pluginExpressionsEqual,
+  pluginUsageHiddenEqual,
+} from '@/features/pricing/lib/plugin-pricing'
 import {
   createDefaultTaskVisualConfig,
   generateTaskExprFromConfig,
 } from '@/features/pricing/lib/task-expr'
-import type { BillingUsageSchema } from '@/features/pricing/types'
+import type {
+  BillingUsageSchema,
+  ModelUsageHidden,
+} from '@/features/pricing/types'
 import { useDebounce } from '@/hooks/use-debounce'
 import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
@@ -239,6 +245,9 @@ export const ModelPricingEditorPanel = forwardRef<
   const [pluginExpressions, setPluginExpressions] = useState<
     Record<string, string>
   >({})
+  const [pluginUsageHidden, setPluginUsageHidden] = useState<
+    Record<string, ModelUsageHidden>
+  >({})
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const [ordinaryPricingModel, setOrdinaryPricingModel] = useState<
     string | null
@@ -338,6 +347,34 @@ export const ModelPricingEditorPanel = forwardRef<
   const usesTaskPricing =
     ordinaryPricingModel !== watchedValues.name &&
     usesTaskModelPricing(editData, taskUsageSchema, pluginVariants)
+  // The model-level schema belongs to the plugin that declares this model, so
+  // its hidden values are stored under that plugin key.
+  const modelPluginKey = pluginVariants?.find(
+    (variant) => !variant.stale
+  )?.plugin_key
+  const modelUsageHidden = modelPluginKey
+    ? pluginUsageHidden[modelPluginKey]
+    : undefined
+  // The model-level expression is shared by every provider, so the fixed charge
+  // stays editable unless every provider bills only for metered usage.
+  const activeVariants = (pluginVariants ?? []).filter(
+    (variant) => !variant.stale
+  )
+  const modelNoConstantCharge =
+    activeVariants.length > 0 &&
+    activeVariants.every((variant) => variant.no_constant_charge)
+  const handleModelUsageHiddenChange = useCallback(
+    (next: ModelUsageHidden) => {
+      if (!modelPluginKey) return
+      setPluginUsageHidden((current) => {
+        const copy = { ...current }
+        if (Object.keys(next).length === 0) delete copy[modelPluginKey]
+        else copy[modelPluginKey] = next
+        return copy
+      })
+    },
+    [modelPluginKey]
+  )
   const defaultTaskBillingExpr = useMemo(
     () =>
       taskUsageSchema
@@ -359,6 +396,7 @@ export const ModelPricingEditorPanel = forwardRef<
     conversionGeneration.current += 1
     setConversionReason('')
     setPluginExpressions(editData?.pluginBillingExpr ?? {})
+    setPluginUsageHidden(editData?.pluginUsageHidden ?? {})
     setOrdinaryPricingModel(null)
     setWasConverted(false)
     setConversionPreview(null)
@@ -422,7 +460,11 @@ export const ModelPricingEditorPanel = forwardRef<
         pricingMode !== initialPricingMode ||
         billingExpr !== initialBillingExpr ||
         requestRuleExpr !== (editData?.requestRuleExpr ?? '') ||
-        !pluginExpressionsEqual(pluginExpressions, editData?.pluginBillingExpr)
+        !pluginExpressionsEqual(
+          pluginExpressions,
+          editData?.pluginBillingExpr
+        ) ||
+        !pluginUsageHiddenEqual(pluginUsageHidden, editData?.pluginUsageHidden)
     )
   }, [
     onDirtyChange,
@@ -434,6 +476,7 @@ export const ModelPricingEditorPanel = forwardRef<
     initialPricingMode,
     initialBillingExpr,
     pluginExpressions,
+    pluginUsageHidden,
   ])
 
   const setFormValue = (field: keyof ModelPricingFormValues, value: string) => {
@@ -693,6 +736,10 @@ export const ModelPricingEditorPanel = forwardRef<
         Object.keys(pluginExpressions).length
           ? { pluginBillingExpr: pluginExpressions }
           : {}),
+        ...(editData?.pluginUsageHidden ||
+        Object.keys(pluginUsageHidden).length > 0
+          ? { pluginUsageHidden }
+          : {}),
         billingMode: pricingMode,
         price: values.price || '',
         ratio: values.ratio || '',
@@ -716,6 +763,7 @@ export const ModelPricingEditorPanel = forwardRef<
       requestRuleExpr,
       resolvedBillingExpr,
       pluginExpressions,
+      pluginUsageHidden,
       editData,
       pluginVariants,
     ]
@@ -849,6 +897,9 @@ export const ModelPricingEditorPanel = forwardRef<
         requestRuleExpr={requestRuleExpr}
         usageSchema={taskUsageSchema}
         usageExamples={taskUsageExamples}
+        usageHidden={modelUsageHidden}
+        onUsageHiddenChange={handleModelUsageHiddenChange}
+        noConstantCharge={modelNoConstantCharge}
         onBillingExprChange={setBillingExpr}
         onRequestRuleExprChange={setRequestRuleExpr}
       />
@@ -949,6 +1000,8 @@ export const ModelPricingEditorPanel = forwardRef<
                   variants={pluginVariants ?? []}
                   expressions={pluginExpressions}
                   onChange={setPluginExpressions}
+                  usageHidden={pluginUsageHidden}
+                  onUsageHiddenChange={setPluginUsageHidden}
                   modelExpression={combineBillingExpr(
                     resolvedBillingExpr,
                     requestRuleExpr

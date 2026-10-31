@@ -310,3 +310,38 @@ func TestPricingSharedPluginVariantsUseEachSchemaAndExpression(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(encoded), "billing_plugin_variants")
 }
+
+func TestPluginUsageHiddenFiltersSchemaAndValidatesDrafts(t *testing.T) {
+	const key = "pricing-hidden-probe"
+	source := strings.ReplaceAll(pricingUsagePluginSource("1.0.0", `{
+  resolution: {enum:["480p","1080p"]},
+  seconds: {type:"number", unit:"second"}
+}`), "pricing-usage-probe", key)
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(key) })
+	saved := config.GlobalConfig.ExportAllConfigs()
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		billing_setting.PluginUsageHiddenOption: `{"` + key + `::pricing-usage-model":{"resolution":{"1080p":"deleted"}}}`,
+	}))
+
+	schema := map[string]jsplugin.UsageFieldSchema{
+		"resolution": {Enum: []string{"480p", "1080p"}},
+		"seconds":    {Type: "number", Unit: "second"},
+	}
+	filtered := filterHiddenUsageSchema(key, schema, "pricing-usage-model", "upstream-alias")
+	assert.Equal(t, []string{"480p"}, filtered["resolution"].Enum)
+	assert.Equal(t, "second", filtered["seconds"].Unit)
+
+	draft := func(field string, values map[string]any) PricingValues {
+		return PricingValues{billing_setting.PluginUsageHiddenOption: map[string]any{
+			key: map[string]any{field: values},
+		}}
+	}
+	require.NoError(t, ValidateModelPricing("pricing-usage-model", draft("resolution", map[string]any{"1080p": "hidden"})))
+	require.ErrorContains(t, ValidateModelPricing("pricing-usage-model", draft("resolution", map[string]any{"1080p": "visible"})), "invalid state")
+	require.ErrorContains(t, ValidateModelPricing("pricing-usage-model", draft("resolution", map[string]any{"4k": "hidden"})), "not a declared value")
+	require.ErrorContains(t, ValidateModelPricing("pricing-usage-model", draft("seconds", map[string]any{"5": "hidden"})), "not an enum")
+	require.ErrorContains(t, ValidateModelPricing("other-model", draft("resolution", map[string]any{"480p": "hidden"})), "does not declare this model")
+}

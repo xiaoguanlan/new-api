@@ -233,6 +233,17 @@ const WORKFLOWS = {
     defaultResolution: "768p竖",
     resolutions: ["480p横", "480p竖", "768p横", "768p竖", "480p(1:1)", "768p(1:1)"],
   },
+  minimax_h3_zm_u22: {
+    action: "image_to_video",
+    maxDuration: 15,
+    required: ["prompt", "ref_image_0"],
+    images: 9,
+    audios: 3,
+    // input_rules exposes inputs.noise_seed with min 0.
+    seedMin: 0,
+    defaultResolution: "768p竖",
+    resolutions: ["480p横", "480p竖", "768p横", "768p竖"],
+  },
   minimax_h3_zm_u24: {
     action: "image_to_video",
     maxDuration: 15,
@@ -305,6 +316,18 @@ const OUTPUT_SECONDS_CAP = 3600;
 const CJK_CHARS_PER_SECOND = 4.5;
 const LATIN_CHARS_PER_SECOND = 15;
 
+// Images, audio, and video the client attaches to a workflow are billed per
+// asset. Every provided input counts, including the first one; an input the
+// vendor fills from its own default is not an asset the client supplied.
+const MEDIA_INPUT_KEY = /^(ref_(image|audio|video)(_\d+)?|first_frame|last_frame|prompt_simple|emo_ref_audio)$/;
+
+const MEDIA_INPUTS_FIELD = {
+  type: "number",
+  unit: "count",
+  unitLabel: { en: "media input", zh: "个素材" },
+  description: { en: "Media input unit price", zh: "媒体输入单价" },
+};
+
 export const meta = {
   apiVersion: 1,
   key: "comfyui",
@@ -314,7 +337,7 @@ export const meta = {
     en: "AutoDL ComfyUI workflow inference (video generation and speech synthesis)",
     zh: "AutoDL ComfyUI 工作流推理（视频生成与语音合成）",
   },
-  version: "1.1.0",
+  version: "1.3.0",
   author: { name: "AutoDL" },
   models: VIDEO_MODELS.concat([TTS_MODEL]),
   fetchMode: "per_task",
@@ -332,6 +355,7 @@ export const meta = {
       unit: "second",
       description: { en: "Video generation unit price", zh: "视频生成单价" },
     },
+    media_inputs: MEDIA_INPUTS_FIELD,
     resolution: {
       enum: VIDEO_TIERS,
       enumLabels: {
@@ -346,14 +370,24 @@ export const meta = {
       description: { en: "Output video resolution", zh: "输出视频分辨率" },
     },
   },
+  // AutoDL charges only for generated seconds and supplied media inputs; there
+  // is no fixed per-request fee, so the pricing editor hides that column.
+  noConstantCharge: true,
   usageExamples: [
-    { label: "5s · 768p", facts: { seconds: 5, resolution: "768p" } },
-    { label: "10s · 480p", facts: { seconds: 10, resolution: "480p" } },
+    {
+      label: "5s · 768p · 1 media input",
+      facts: { seconds: 5, resolution: "768p", media_inputs: 1 },
+    },
+    {
+      label: "10s · 480p · 3 media inputs",
+      facts: { seconds: 10, resolution: "480p", media_inputs: 3 },
+    },
   ],
   usageProfiles: [
     {
       // AutoDL bills speech synthesis per generated audio second but returns
-      // no duration, so the output WAV header is read while polling.
+      // no duration, so the output WAV header is read while polling. The
+      // mandatory voice reference is one media input.
       models: [TTS_MODEL],
       schema: {
         seconds: {
@@ -361,8 +395,11 @@ export const meta = {
           unit: "second",
           description: { en: "Speech synthesis unit price", zh: "语音合成单价" },
         },
+        media_inputs: MEDIA_INPUTS_FIELD,
       },
-      examples: [{ label: "10s", facts: { seconds: 10 } }],
+      examples: [
+        { label: "10s · 1 media input", facts: { seconds: 10, media_inputs: 1 } },
+      ],
     },
     {
       // The retargeted clip follows the reference video's length and no
@@ -374,8 +411,11 @@ export const meta = {
           unit: "second",
           description: { en: "Video generation unit price", zh: "视频生成单价" },
         },
+        media_inputs: MEDIA_INPUTS_FIELD,
       },
-      examples: [{ label: "10s", facts: { seconds: 10 } }],
+      examples: [
+        { label: "10s · 2 media inputs", facts: { seconds: 10, media_inputs: 2 } },
+      ],
     },
   ],
   protocols: [
@@ -413,6 +453,16 @@ function estimatedSpeechSeconds(source) {
 
 function firstUrl(value) {
   return trimmed(value);
+}
+
+// Counts the media entries in the normalized request body. Only values that
+// reach AutoDL count, so the count follows the body exactly.
+function countMediaInputs(source) {
+  let count = 0;
+  for (const key of Object.keys(source || {})) {
+    if (MEDIA_INPUT_KEY.test(key) && trimmed(source[key])) count += 1;
+  }
+  return count;
 }
 
 // Splits an AutoDL resolution label such as "768p横(1376*768)" or
@@ -666,7 +716,10 @@ export function parseSubmitResponse(ctx, resp) {
 export function extractUsage(ctx) {
   const model = upstreamModelOf(ctx);
   const source = ctx.requestBody || {};
-  if (model === TTS_MODEL) return { seconds: estimatedSpeechSeconds(source) };
+  const mediaInputs = countMediaInputs(source);
+  if (model === TTS_MODEL) {
+    return { seconds: estimatedSpeechSeconds(source), media_inputs: mediaInputs };
+  }
   const spec = WORKFLOWS[model];
   if (!spec) throw new Error("unsupported model: " + model);
   // The retargeting workflow follows the reference video's length, so the
@@ -676,7 +729,10 @@ export function extractUsage(ctx) {
   if (!Number.isFinite(seconds) || seconds < MIN_DURATION) {
     throw new Error((spec.durationField || "duration") + " must be between " + MIN_DURATION + " and " + (spec.maxDuration || OUTPUT_SECONDS_CAP) + " seconds");
   }
-  const facts = { seconds: Math.min(seconds, OUTPUT_SECONDS_CAP) };
+  const facts = {
+    seconds: Math.min(seconds, OUTPUT_SECONDS_CAP),
+    media_inputs: mediaInputs,
+  };
   if (spec.resolutionFact !== false) {
     const requested = trimmed(source.resolution);
     facts.resolution = requested ? resolutionParts(requested).tier : resolutionParts(spec.defaultResolution).tier;

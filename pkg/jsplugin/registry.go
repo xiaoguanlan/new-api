@@ -106,7 +106,10 @@ type Meta struct {
 	UsageSchema          map[string]UsageFieldSchema `json:"usageSchema,omitempty"`
 	UsageExamples        []UsageExample              `json:"usageExamples,omitempty"`
 	UsageProfiles        []UsageProfile              `json:"usageProfiles,omitempty"`
-	Auth                 AuthMeta                    `json:"auth"`
+	// NoConstantCharge hides the fixed per-request charge from the visual task
+	// pricing editor: the plugin bills only for metered usage.
+	NoConstantCharge bool     `json:"noConstantCharge,omitempty"`
+	Auth             AuthMeta `json:"auth"`
 }
 
 // Upstream kinds a plugin driver can address. Every driver speaks to its
@@ -1022,7 +1025,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "noConstantCharge", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1150,6 +1153,9 @@ func decodeMeta(value any) (Meta, error) {
 		if err != nil {
 			return Meta{}, err
 		}
+	}
+	if meta.NoConstantCharge, err = boolMetaField(object, "noConstantCharge"); err != nil {
+		return Meta{}, err
 	}
 	for _, removedField := range []string{"submitPaths", "actions"} {
 		if _, exists := object[removedField]; exists {
@@ -1912,6 +1918,18 @@ func integerMetaField(object map[string]any, name string) (int, error) {
 	default:
 		return 0, fmt.Errorf("plugin meta %s must be an integer", name)
 	}
+}
+
+func boolMetaField(object map[string]any, name string) (bool, error) {
+	value, exists := object[name]
+	if !exists {
+		return false, nil
+	}
+	flag, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("plugin meta %s must be a boolean", name)
+	}
+	return flag, nil
 }
 
 func integerSliceMetaField(object map[string]any, name string) ([]int, error) {

@@ -109,3 +109,28 @@ func TestSmokeTestExprRejectsTaskUsageWithoutSchema(t *testing.T) {
 
 	require.NoError(t, SmokeTestExpr(`tier("base", p * 2 + c * 8)`))
 }
+
+func TestUsageHiddenModelsMatchesPluginAndAnyCandidateModel(t *testing.T) {
+	previous := billingSetting.PluginUsageHidden
+	billingSetting.PluginUsageHidden = map[string]map[string]map[string]string{
+		PluginBillingExprKey("comfyui", "video-model"): {
+			"resolution": {"1080p": UsageHiddenStateDeleted},
+		},
+	}
+	t.Cleanup(func() { billingSetting.PluginUsageHidden = previous })
+
+	assert.Equal(t, UsageHiddenStateDeleted, UsageHiddenState("comfyui", "video-model", "resolution", "1080p"))
+	assert.Empty(t, UsageHiddenState("comfyui", "video-model", "resolution", "720p"))
+	assert.Empty(t, UsageHiddenState("other-plugin", "video-model", "resolution", "1080p"))
+	assert.Equal(t, UsageHiddenStateDeleted,
+		UsageHiddenModels("comfyui", []string{"upstream-model", "video-model"}, "resolution", "1080p"))
+	assert.Empty(t, UsageHiddenModels("comfyui", []string{"upstream-model"}, "resolution", "1080p"))
+
+	copied := GetPluginUsageHiddenCopy()
+	copied[PluginBillingExprKey("comfyui", "video-model")]["resolution"]["1080p"] = UsageHiddenStateHidden
+	assert.Equal(t, UsageHiddenStateDeleted, UsageHiddenState("comfyui", "video-model", "resolution", "1080p"))
+
+	assert.True(t, ValidUsageHiddenState(UsageHiddenStateHidden))
+	assert.True(t, ValidUsageHiddenState(UsageHiddenStateDeleted))
+	assert.False(t, ValidUsageHiddenState("visible"))
+}

@@ -19,8 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { t } from 'i18next'
 
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
-import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing'
-import type { PricingModel } from '@/features/pricing/types'
+import {
+  normalizeUsageHidden,
+  splitPluginBillingExprKey,
+} from '@/features/pricing/lib/plugin-pricing'
+import type { ModelUsageHidden, PricingModel } from '@/features/pricing/types'
 import {
   usesTaskModelPricing,
   type ModelRatioData,
@@ -44,15 +47,17 @@ export const PRICING_KEYS = [
   'billing_setting.billing_mode',
   'billing_setting.billing_expr',
   'billing_setting.plugin_billing_expr',
+  'billing_setting.plugin_usage_hidden',
 ] as const
 export type PricingKey = (typeof PRICING_KEYS)[number]
+export type PluginScopedPricingKey =
+  | 'billing_setting.plugin_billing_expr'
+  | 'billing_setting.plugin_usage_hidden'
 export type PricingValues = Partial<
-  Record<
-    Exclude<PricingKey, 'billing_setting.plugin_billing_expr'>,
-    number | string
-  >
+  Record<Exclude<PricingKey, PluginScopedPricingKey>, number | string>
 > & {
   'billing_setting.plugin_billing_expr'?: Record<string, string>
+  'billing_setting.plugin_usage_hidden'?: Record<string, ModelUsageHidden>
 }
 export type PricingOptions = Record<PricingKey, string>
 
@@ -153,6 +158,9 @@ export function pricingOptions(
       if (key === 'billing_setting.plugin_billing_expr') {
         value ??= values.PluginBillingExpr
       }
+      if (key === 'billing_setting.plugin_usage_hidden') {
+        value ??= values.PluginUsageHidden
+      }
       return [key, typeof value === 'string' ? value : '{}']
     })
   ) as PricingOptions
@@ -171,6 +179,7 @@ export function pricingRows(options: PricingOptions): ModelPricingSnapshot[] {
     billingMode: options['billing_setting.billing_mode'],
     billingExpr: options['billing_setting.billing_expr'],
     pluginBillingExpr: options['billing_setting.plugin_billing_expr'],
+    pluginUsageHidden: options['billing_setting.plugin_usage_hidden'],
   })
 }
 
@@ -180,14 +189,15 @@ export function pricingRow(
 ): ModelRatioData {
   const options = Object.fromEntries(
     PRICING_KEYS.map((key) => {
-      if (key === 'billing_setting.plugin_billing_expr') {
+      if (isPluginScopedPricingKey(key)) {
+        const grouped = values[key] as Record<string, unknown> | undefined
         return [
           key,
           JSON.stringify(
             Object.fromEntries(
-              Object.entries(values[key] ?? {}).map(([plugin, expression]) => [
+              Object.entries(grouped ?? {}).map(([plugin, value]) => [
                 `${plugin}::${name}`,
-                expression,
+                value,
               ])
             )
           ),
@@ -210,7 +220,17 @@ export function pricingRow(
     name,
     billingMode,
     pluginBillingExpr: values['billing_setting.plugin_billing_expr'],
+    pluginUsageHidden: values['billing_setting.plugin_usage_hidden'],
   }
+}
+
+export function isPluginScopedPricingKey(
+  key: string
+): key is PluginScopedPricingKey {
+  return (
+    key === 'billing_setting.plugin_billing_expr' ||
+    key === 'billing_setting.plugin_usage_hidden'
+  )
 }
 
 export function pricingFromDraft(data: ModelRatioData): PricingValues {
@@ -218,6 +238,9 @@ export function pricingFromDraft(data: ModelRatioData): PricingValues {
     ...(data.pluginBillingExpr === undefined
       ? {}
       : { 'billing_setting.plugin_billing_expr': data.pluginBillingExpr }),
+    ...(data.pluginUsageHidden === undefined
+      ? {}
+      : { 'billing_setting.plugin_usage_hidden': data.pluginUsageHidden }),
     'billing_setting.billing_mode':
       data.billingMode === 'tiered_expr' ? 'tiered_expr' : 'ratio',
   }
@@ -259,6 +282,7 @@ export function applyPricingDraft(
   // to other models, while still committing the source provider draft.
   const copied = { ...values }
   delete copied['billing_setting.plugin_billing_expr']
+  delete copied['billing_setting.plugin_usage_hidden']
   const next = applyPricingValues(options, copied, names)
   return names.includes(data.name)
     ? applyPricingValues(next, values, [data.name])
@@ -276,8 +300,9 @@ function applyPricingValues(
         string,
         number | string
       >
-      if (key === 'billing_setting.plugin_billing_expr') {
-        // Model-only imports and batch copies retain each target's provider prices.
+      if (isPluginScopedPricingKey(key)) {
+        // Model-only imports and batch copies retain each target's provider
+        // prices and hidden values.
         if (values[key] === undefined) return [key, JSON.stringify(map)]
         for (const name of names) {
           for (const variant of Object.keys(map)) {
@@ -285,8 +310,10 @@ function applyPricingValues(
               delete map[variant]
             }
           }
-          for (const [plugin, expression] of Object.entries(values[key])) {
-            map[`${plugin}::${name}`] = expression
+          for (const [plugin, value] of Object.entries(
+            values[key] as Record<string, unknown>
+          )) {
+            map[`${plugin}::${name}`] = value as unknown as number | string
           }
         }
         return [key, JSON.stringify(map)]
@@ -317,6 +344,26 @@ export function pricingValuesByModel(
       throw new Error(t('Pricing must be a JSON object'))
     }
     for (const [name, value] of Object.entries(map)) {
+      if (key === 'billing_setting.plugin_usage_hidden') {
+        if (
+          value === null ||
+          typeof value !== 'object' ||
+          Array.isArray(value)
+        ) {
+          throw new Error(t('Invalid pricing value'))
+        }
+        const parts = splitPluginBillingExprKey(name)
+        if (!parts) throw new Error(t('Invalid pricing value'))
+        const [plugin, modelName] = parts
+        const model = models.get(modelName) ?? {}
+        const hidden = (model[key] ?? {}) as Record<string, ModelUsageHidden>
+        model[key] = {
+          ...hidden,
+          [plugin]: normalizeUsageHidden(value as ModelUsageHidden),
+        }
+        models.set(modelName, model)
+        continue
+      }
       if (typeof value !== 'number' && typeof value !== 'string') {
         throw new Error(t('Invalid pricing value'))
       }
@@ -362,10 +409,7 @@ export function applyPriceSyncSelections(
           .split('_')
           .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
           .join('') as PricingKey
-        if (
-          PRICING_KEYS.includes(key) &&
-          key !== 'billing_setting.plugin_billing_expr'
-        ) {
+        if (PRICING_KEYS.includes(key) && !isPluginScopedPricingKey(key)) {
           next[key] = value
         }
       }

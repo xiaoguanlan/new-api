@@ -14,6 +14,43 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
+// filterHiddenUsageSchema drops enum values the administrator hid or deleted
+// for this plugin and model. The public price table then omits their tiers,
+// and clients never see a selectable value that relay rejects.
+func filterHiddenUsageSchema(pluginKey string, schema map[string]jsplugin.UsageFieldSchema, models ...string) map[string]jsplugin.UsageFieldSchema {
+	statesByField := make(map[string]map[string]struct{})
+	for _, model := range models {
+		for field, states := range billing_setting.GetPluginUsageHidden(pluginKey, model) {
+			merged := statesByField[field]
+			if merged == nil {
+				merged = make(map[string]struct{}, len(states))
+				statesByField[field] = merged
+			}
+			for value := range states {
+				merged[value] = struct{}{}
+			}
+		}
+	}
+	if len(statesByField) == 0 {
+		return schema
+	}
+	for field, definition := range schema {
+		states := statesByField[field]
+		if len(definition.Enum) == 0 || len(states) == 0 {
+			continue
+		}
+		kept := make([]string, 0, len(definition.Enum))
+		for _, value := range definition.Enum {
+			if _, disabled := states[value]; !disabled {
+				kept = append(kept, value)
+			}
+		}
+		definition.Enum = kept
+		schema[field] = definition
+	}
+	return schema
+}
+
 type PricingPluginVariant struct {
 	PluginKey            string                               `json:"plugin_key"`
 	PluginName           string                               `json:"plugin_name"`
@@ -393,7 +430,12 @@ func updatePricing() {
 		}
 		if ok && plugin != nil {
 			usageSchema, usageExamples := plugin.Meta.UsageForModel(usageModel)
-			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
+			pricing.BillingUsageSchema = filterHiddenUsageSchema(
+				plugin.Meta.Key,
+				jsplugin.CloneUsageSchema(usageSchema),
+				model,
+				usageModel,
+			)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
 		}
 		providers := pluginGeneration.PluginsByModel(model)
@@ -421,7 +463,11 @@ func updatePricing() {
 				pricing.BillingPluginVariants = append(pricing.BillingPluginVariants, PricingPluginVariant{
 					PluginKey: provider.Meta.Key, PluginName: provider.Meta.Name, Icon: provider.Meta.Icon,
 					BillingExpr: expression, BillingMode: mode,
-					BillingUsageSchema: jsplugin.CloneUsageSchema(schema), BillingUsageExamples: jsplugin.CloneUsageExamples(examples),
+					BillingUsageSchema: filterHiddenUsageSchema(
+						provider.Meta.Key,
+						jsplugin.CloneUsageSchema(schema),
+						model,
+					), BillingUsageExamples: jsplugin.CloneUsageExamples(examples),
 				})
 			}
 		}

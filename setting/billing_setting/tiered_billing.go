@@ -23,22 +23,33 @@ const (
 	BillingModeField        = "billing_mode"
 	BillingExprField        = "billing_expr"
 	PluginBillingExprOption = "billing_setting.plugin_billing_expr"
+	PluginUsageHiddenOption = "billing_setting.plugin_usage_hidden"
+	UsageHiddenStateHidden  = "hidden"
+	UsageHiddenStateDeleted = "deleted"
 	maxTaskExprSmokeTests   = 64
 )
 
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr,
-// billing_setting.plugin_billing_expr
+// billing_setting.plugin_billing_expr, billing_setting.plugin_usage_hidden
+//
+// PluginUsageHidden disables usage values per plugin and model. Keys use the
+// same "plugin::model" form as PluginBillingExpr; the value maps a usage field
+// to the enum values that must be rejected ("hidden") or are hidden from the
+// editor ("deleted"). Both states reject requests because a plugin may keep
+// accepting a value the administrator took off the price table.
 type BillingSetting struct {
-	BillingMode       map[string]string `json:"billing_mode"`
-	BillingExpr       map[string]string `json:"billing_expr"`
-	PluginBillingExpr map[string]string `json:"plugin_billing_expr"`
+	BillingMode       map[string]string                       `json:"billing_mode"`
+	BillingExpr       map[string]string                       `json:"billing_expr"`
+	PluginBillingExpr map[string]string                       `json:"plugin_billing_expr"`
+	PluginUsageHidden map[string]map[string]map[string]string `json:"plugin_usage_hidden"`
 }
 
 var billingSetting = BillingSetting{
 	BillingMode:       make(map[string]string),
 	BillingExpr:       make(map[string]string),
 	PluginBillingExpr: make(map[string]string),
+	PluginUsageHidden: make(map[string]map[string]map[string]string),
 }
 
 func init() {
@@ -102,6 +113,56 @@ func GetPluginBillingExprCopy() map[string]string {
 func GetPluginBillingExpr(pluginKey, model string) (string, bool) {
 	expression, ok := billingSetting.PluginBillingExpr[PluginBillingExprKey(pluginKey, model)]
 	return expression, ok
+}
+
+func ValidUsageHiddenState(state string) bool {
+	return state == UsageHiddenStateHidden || state == UsageHiddenStateDeleted
+}
+
+// GetPluginUsageHiddenCopy returns a deep copy so callers can edit or replace
+// the setting without holding a reference into the live configuration.
+func GetPluginUsageHiddenCopy() map[string]map[string]map[string]string {
+	if len(billingSetting.PluginUsageHidden) == 0 {
+		return map[string]map[string]map[string]string{}
+	}
+	result := make(map[string]map[string]map[string]string, len(billingSetting.PluginUsageHidden))
+	for key, fields := range billingSetting.PluginUsageHidden {
+		fieldCopy := make(map[string]map[string]string, len(fields))
+		for field, values := range fields {
+			valuesCopy := make(map[string]string, len(values))
+			maps.Copy(valuesCopy, values)
+			fieldCopy[field] = valuesCopy
+		}
+		result[key] = fieldCopy
+	}
+	return result
+}
+
+// GetPluginUsageHidden returns the field → enum value → state map for one
+// plugin and model. The returned map is read-only.
+func GetPluginUsageHidden(pluginKey, model string) map[string]map[string]string {
+	return billingSetting.PluginUsageHidden[PluginBillingExprKey(pluginKey, model)]
+}
+
+// UsageHiddenState reports how a concrete usage value is disabled for a
+// plugin, or "" when the value may still be priced and requested.
+func UsageHiddenState(pluginKey, model, field, value string) string {
+	return GetPluginUsageHidden(pluginKey, model)[field][value]
+}
+
+// UsageHiddenModels reports whether any candidate model hides the value. Relay
+// passes the upstream model before the client-facing model, while the pricing
+// editor stores the client-facing name, so every candidate must be checked.
+func UsageHiddenModels(pluginKey string, models []string, field, value string) string {
+	for _, model := range models {
+		if model == "" {
+			continue
+		}
+		if state := UsageHiddenState(pluginKey, model, field, value); state != "" {
+			return state
+		}
+	}
+	return ""
 }
 
 // ResolveTaskBillingExpr selects the executing plugin's override before the

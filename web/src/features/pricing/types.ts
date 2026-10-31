@@ -40,6 +40,16 @@ export type BillingUsageFieldSchema = {
 
 export type BillingUsageSchema = Record<string, BillingUsageFieldSchema>
 
+// One usage field's enum values that the price table no longer accepts.
+// "hidden" keeps the row visible in the editor; "deleted" removes it. Both
+// reject requests.
+export type BillingUsageHiddenState = 'hidden' | 'deleted'
+
+export type ModelUsageHidden = Record<
+  string,
+  Record<string, BillingUsageHiddenState>
+>
+
 export type BillingUsageExample = {
   label: string
   facts: Record<string, string | number>

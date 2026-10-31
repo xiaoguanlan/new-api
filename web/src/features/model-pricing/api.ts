@@ -28,6 +28,7 @@ import { pluginExpressionsEqual } from '@/features/pricing/lib/plugin-pricing'
 import type {
   BillingUsageSchema,
   BillingUsageExample,
+  ModelUsageHidden,
 } from '@/features/pricing/types'
 import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
@@ -55,6 +56,8 @@ export type ModelPricingPluginVariant = {
   icon?: string
   usage_schema: BillingUsageSchema
   usage_examples?: BillingUsageExample[]
+  usage_hidden?: ModelUsageHidden
+  no_constant_charge?: boolean
   configured: string
   effective: string
   compatible: boolean
@@ -187,11 +190,21 @@ export function buildPricingChanges(
   for (const name of new Set([...previous.keys(), ...next.keys()])) {
     const oldValues = previous.get(name) ?? {}
     const newValues = next.get(name) ?? {}
-    const dirty = PRICING_KEYS.filter((key) =>
-      key === 'billing_setting.plugin_billing_expr'
-        ? !pluginExpressionsEqual(oldValues[key], newValues[key])
-        : oldValues[key] !== newValues[key]
-    )
+    const dirty = PRICING_KEYS.filter((key) => {
+      if (key === 'billing_setting.plugin_billing_expr') {
+        return !pluginExpressionsEqual(oldValues[key], newValues[key])
+      }
+      if (key === 'billing_setting.plugin_usage_hidden') {
+        const left = oldValues[key] as
+          | Record<string, Record<string, Record<string, string>>>
+          | undefined
+        const right = newValues[key] as
+          | Record<string, Record<string, Record<string, string>>>
+          | undefined
+        return JSON.stringify(left ?? {}) !== JSON.stringify(right ?? {})
+      }
+      return oldValues[key] !== newValues[key]
+    })
     if (!dirty.length) continue
     const entry = entries.get(name)
     const pricing = { ...entry?.configured }

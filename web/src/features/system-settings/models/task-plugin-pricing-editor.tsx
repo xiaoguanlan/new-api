@@ -39,6 +39,7 @@ import {
   createDefaultTaskVisualConfig,
   generateTaskExprFromConfig,
 } from '@/features/pricing/lib/task-expr'
+import type { ModelUsageHidden } from '@/features/pricing/types'
 import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 
 import { SettingsSwitchField } from '../components/settings-form-layout'
@@ -48,6 +49,10 @@ type TaskPluginPricingEditorProps = {
   variants: ModelPricingPluginVariant[]
   expressions: Record<string, string>
   onChange: Dispatch<SetStateAction<Record<string, string>>>
+  usageHidden: Record<string, ModelUsageHidden>
+  onUsageHiddenChange: Dispatch<
+    SetStateAction<Record<string, ModelUsageHidden>>
+  >
   modelExpression: string
   modelBillingMode?: 'ratio' | 'tiered_expr'
   currency: PricingCurrency
@@ -78,6 +83,18 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
   })
 
   if (props.variants.length === 0) return props.children
+
+  const handleUsageHiddenChange = (
+    pluginKey: string,
+    next: ModelUsageHidden
+  ) => {
+    props.onUsageHiddenChange((current) => {
+      const copy = { ...current }
+      if (Object.keys(next).length === 0) delete copy[pluginKey]
+      else copy[pluginKey] = next
+      return copy
+    })
+  }
 
   return (
     <Tabs
@@ -283,6 +300,11 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
                 requestRuleExpr={split.requestRuleExpr}
                 usageSchema={variant.usage_schema}
                 usageExamples={variant.usage_examples}
+                usageHidden={props.usageHidden[key]}
+                onUsageHiddenChange={(next) =>
+                  handleUsageHiddenChange(key, next)
+                }
+                noConstantCharge={variant.no_constant_charge}
                 onBillingExprChange={(value) =>
                   props.onChange((current) => ({
                     ...current,

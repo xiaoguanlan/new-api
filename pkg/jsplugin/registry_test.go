@@ -1271,3 +1271,25 @@ export function parseSubmitEventDelta(){return {changes:[],state:null,done:true}
 		})
 	}
 }
+
+func TestMetaNoConstantCharge(t *testing.T) {
+	plugin, err := CompilePlugin(
+		routingTestPluginSource("no-constant", 0, `["model"]`, `noConstantCharge: true,`, ""),
+		Options{},
+	)
+	require.NoError(t, err)
+	assert.True(t, plugin.Meta.NoConstantCharge)
+
+	plugin, err = CompilePlugin(
+		routingTestPluginSource("no-constant-default", 0, `["model"]`, "", ""),
+		Options{},
+	)
+	require.NoError(t, err)
+	assert.False(t, plugin.Meta.NoConstantCharge)
+
+	_, err = CompilePlugin(
+		routingTestPluginSource("no-constant-invalid", 0, `["model"]`, `noConstantCharge: "yes",`, ""),
+		Options{},
+	)
+	require.ErrorContains(t, err, "noConstantCharge must be a boolean")
+}

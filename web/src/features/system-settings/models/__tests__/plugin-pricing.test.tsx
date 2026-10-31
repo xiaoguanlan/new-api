@@ -225,6 +225,8 @@ it('keeps long provider names accessible while allowing the tabs to wrap', () =>
       ]}
       expressions={{}}
       onChange={vi.fn()}
+      usageHidden={{}}
+      onUsageHiddenChange={vi.fn()}
       modelExpression='1'
       currency={USD_PRICING_CURRENCY}
     >
@@ -293,6 +295,8 @@ it('shows pending server validation for an expression the browser cannot check',
       ]}
       expressions={{}}
       onChange={vi.fn()}
+      usageHidden={{}}
+      onUsageHiddenChange={vi.fn()}
       modelExpression='futureFunction()'
       currency={USD_PRICING_CURRENCY}
     >
@@ -396,6 +400,38 @@ it('clears dirty state after restoring an override in a different key order', as
   expect(dirty).toHaveBeenLastCalledWith(true)
   await user.click(toggle)
   expect(dirty).toHaveBeenLastCalledWith(false)
+})
+
+it('hides the fixed charge for a provider that bills only metered usage', async () => {
+  const expression = 'tier("base", u("seconds") * 0.4)'
+  renderEditor(
+    {
+      name: 'shared',
+      billingMode: 'tiered_expr',
+      billingExpr: expression,
+      pluginBillingExpr: { alpha: expression },
+    },
+    [
+      {
+        plugin_key: 'alpha',
+        plugin_name: 'Alpha',
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        configured: expression,
+        effective: expression,
+        compatible: true,
+        no_constant_charge: true,
+      },
+    ]
+  )
+  expect(
+    screen.queryByRole('textbox', { name: 'Additional charge' })
+  ).not.toBeInTheDocument()
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+  expect(screen.getByRole('textbox', { name: 'seconds' })).toHaveValue('0.4')
+  expect(
+    screen.queryByRole('textbox', { name: 'Additional charge' })
+  ).not.toBeInTheDocument()
 })
 
 it('opens task expression pricing when only provider metadata supplies a schema', async () => {

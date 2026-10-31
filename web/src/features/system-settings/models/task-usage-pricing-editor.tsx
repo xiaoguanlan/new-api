@@ -57,6 +57,7 @@ import {
   getTaskEnumCombinations,
   getTaskEnumFields,
   getTaskNumberFields,
+  orderTaskMatrixRowsForPublish,
   taskMatrixToTiers,
   tryParseTaskMatrixConfig,
   tryParseTaskVisualConfig,
@@ -72,6 +73,7 @@ import {
 import type {
   BillingUsageExample,
   BillingUsageSchema,
+  ModelUsageHidden,
 } from '@/features/pricing/types'
 
 import { formatPricingNumber } from './pricing-format'
@@ -84,6 +86,9 @@ type TaskUsagePricingEditorProps = {
   requestRuleExpr: string
   usageSchema: BillingUsageSchema
   usageExamples?: BillingUsageExample[]
+  usageHidden?: ModelUsageHidden
+  onUsageHiddenChange?: (next: ModelUsageHidden) => void
+  noConstantCharge?: boolean
   onBillingExprChange: (next: string) => void
   onRequestRuleExprChange: (next: string) => void
 }
@@ -315,7 +320,25 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   const enumFields = getTaskEnumFields(props.usageSchema)
   const numberFields = getTaskNumberFields(props.usageSchema)
   const combinations = getTaskEnumCombinations(props.usageSchema)
-  const visualTiers = taskMatrixToTiers({ rows: matrixRows }, props.usageSchema)
+  // A plugin that bills only for metered usage has no additional charge.
+  const showConstant = !props.noConstantCharge
+  const publishRowsFor = (
+    rows: TaskMatrixRow[],
+    usageHidden: ModelUsageHidden | undefined
+  ) =>
+    generateTaskExprFromConfig(
+      {
+        tiers: taskMatrixToTiers(
+          { rows: orderTaskMatrixRowsForPublish(rows, usageHidden) },
+          props.usageSchema
+        ),
+      },
+      props.usageSchema
+    )
+  const visualTiers = taskMatrixToTiers(
+    { rows: orderTaskMatrixRowsForPublish(matrixRows, props.usageHidden) },
+    props.usageSchema
+  )
 
   let previewConfig: TaskVisualConfig | null = null
   let previewRequestRuleExpr = props.requestRuleExpr
@@ -343,16 +366,19 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     previewRequestRuleExpr = split.requestRuleExpr
   }
 
-  const publishRows = (nextRows: TaskMatrixRow[]) => {
+  const publishRows = (
+    nextRows: TaskMatrixRow[],
+    usageHidden = props.usageHidden
+  ) => {
     setMatrixRows(nextRows)
-    props.onBillingExprChange(
-      generateTaskExprFromConfig(
-        {
-          tiers: taskMatrixToTiers({ rows: nextRows }, props.usageSchema),
-        },
-        props.usageSchema
-      )
-    )
+    props.onBillingExprChange(publishRowsFor(nextRows, usageHidden))
+  }
+
+  const handleUsageHiddenChange = (next: ModelUsageHidden) => {
+    props.onUsageHiddenChange?.(next)
+    if (editorMode !== 'visual') return
+    // Visibility decides which row becomes the unconditioned fallback.
+    props.onBillingExprChange(publishRowsFor(matrixRows, next))
   }
 
   const handleRowChange = (index: number, next: TaskMatrixRow) => {
@@ -400,12 +426,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       rawMatrix ?? createDefaultTaskMatrixConfig(props.usageSchema)
     ).rows
     setMatrixRows(nextRows)
-    props.onBillingExprChange(
-      generateTaskExprFromConfig(
-        { tiers: taskMatrixToTiers({ rows: nextRows }, props.usageSchema) },
-        props.usageSchema
-      )
-    )
+    props.onBillingExprChange(publishRowsFor(nextRows, props.usageHidden))
     props.onRequestRuleExprChange(rawMatrix ? rawSplit.requestRuleExpr : '')
     setConfirmVisualSwitch(false)
     setEditorMode('visual')
@@ -494,6 +515,13 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                   rows={matrixRows}
                   usageSchema={props.usageSchema}
                   matchedRowIndex={matchedRowIndex}
+                  showConstant={showConstant}
+                  usageHidden={props.usageHidden}
+                  onUsageHiddenChange={
+                    props.onUsageHiddenChange
+                      ? handleUsageHiddenChange
+                      : undefined
+                  }
                   onRowChange={handleRowChange}
                   onFillColumn={handleFillColumn}
                 />
@@ -572,38 +600,40 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                           </Field>
                         )
                       })}
-                      <Field className='gap-1.5'>
-                        <FieldLabel>{t('Additional charge')}</FieldLabel>
-                        <div className='flex items-center gap-2'>
-                          <PricingAmountInput
-                            currency={props.currency}
-                            aria-label={t('Additional charge')}
-                            min={0}
-                            step={0.000001}
-                            value={matrixRows[0].constant}
-                            onFocus={(event) => {
-                              if (Number(event.currentTarget.value) === 0) {
-                                event.currentTarget.select()
-                              }
-                            }}
-                            onChange={(usd) => {
-                              const value = Number(usd)
-                              handleRowChange(0, {
-                                ...matrixRows[0],
-                                constant:
-                                  Number.isFinite(value) && value >= 0
-                                    ? value
-                                    : 0,
-                              })
-                            }}
-                            className='font-mono'
-                          />
-                          <span className='text-muted-foreground shrink-0 text-xs'>
-                            {(props.currency ?? USD_PRICING_CURRENCY).symbol}/
-                            {t('request')}
-                          </span>
-                        </div>
-                      </Field>
+                      {showConstant ? (
+                        <Field className='gap-1.5'>
+                          <FieldLabel>{t('Additional charge')}</FieldLabel>
+                          <div className='flex items-center gap-2'>
+                            <PricingAmountInput
+                              currency={props.currency}
+                              aria-label={t('Additional charge')}
+                              min={0}
+                              step={0.000001}
+                              value={matrixRows[0].constant}
+                              onFocus={(event) => {
+                                if (Number(event.currentTarget.value) === 0) {
+                                  event.currentTarget.select()
+                                }
+                              }}
+                              onChange={(usd) => {
+                                const value = Number(usd)
+                                handleRowChange(0, {
+                                  ...matrixRows[0],
+                                  constant:
+                                    Number.isFinite(value) && value >= 0
+                                      ? value
+                                      : 0,
+                                })
+                              }}
+                              className='font-mono'
+                            />
+                            <span className='text-muted-foreground shrink-0 text-xs'>
+                              {(props.currency ?? USD_PRICING_CURRENCY).symbol}/
+                              {t('request')}
+                            </span>
+                          </div>
+                        </Field>
+                      ) : null}
                     </div>
                   </div>
                 </div>

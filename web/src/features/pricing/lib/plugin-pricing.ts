@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type {
   BillingPluginVariant,
+  BillingUsageHiddenState,
   BillingUsageSchema,
+  ModelUsageHidden,
   PricingModel,
 } from '../types'
 import { compileBillingExpression } from './billing-expression/parser'
@@ -82,6 +84,47 @@ export function pluginExpressionsEqual(
   return (
     keys.length === Object.keys(right).length &&
     keys.every((key) => Object.hasOwn(right, key) && left[key] === right[key])
+  )
+}
+
+// Stable order makes hidden-value maps comparable and diff-free after a save.
+export function normalizeUsageHidden(
+  hidden: ModelUsageHidden | undefined
+): ModelUsageHidden {
+  const result: ModelUsageHidden = {}
+  for (const field of Object.keys(hidden ?? {}).sort()) {
+    const values = hidden?.[field]
+    if (!values) continue
+    const sorted: Record<string, BillingUsageHiddenState> = {}
+    for (const value of Object.keys(values).sort()) {
+      sorted[value] = values[value]
+    }
+    if (Object.keys(sorted).length > 0) result[field] = sorted
+  }
+  return result
+}
+
+export function usageHiddenEqual(
+  left?: ModelUsageHidden,
+  right?: ModelUsageHidden
+): boolean {
+  return (
+    JSON.stringify(normalizeUsageHidden(left)) ===
+    JSON.stringify(normalizeUsageHidden(right))
+  )
+}
+
+export function pluginUsageHiddenEqual(
+  left: Record<string, ModelUsageHidden> = {},
+  right: Record<string, ModelUsageHidden> = {}
+): boolean {
+  const keys = Object.keys(left)
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every(
+      (key) =>
+        Object.hasOwn(right, key) && usageHiddenEqual(left[key], right[key])
+    )
   )
 }
 
