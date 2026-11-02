@@ -158,6 +158,40 @@ func TestComfyUIWorkflowFamilies(t *testing.T) {
 			}),
 		},
 		{
+			// The legacy task request keeps workflow-specific members under
+			// metadata; top-level members win when both are present.
+			name:   "legacy metadata carries workflow fields",
+			model:  "minimax_h3_803",
+			action: "reference_to_video",
+			request: mergeValues(refImages(1), refAudios(1), map[string]any{
+				"prompt": "dance", "seed": 42,
+				"metadata": map[string]any{
+					"seed": 7, "resolution": "480p横", "mode": "pro",
+					"ref_image_0": "https://cdn.example/ignored.png",
+				},
+			}),
+			want: mergeValues(refImages(1), refAudios(1), map[string]any{
+				"prompt": "dance", "resolution": "480p横(864*480)", "seed": float64(42), "mode": "pro",
+			}),
+		},
+		{
+			name:   "speech fields from the legacy metadata map",
+			model:  comfyTTSModel,
+			action: "text_to_speech",
+			request: map[string]any{"metadata": map[string]any{
+				"prompt_text":        "hello",
+				"prompt_simple":      "https://cdn.example/ref.wav",
+				"emo_control_method": "使用情感向量控制",
+				"emo_happy":          0.5,
+			}},
+			want: map[string]any{
+				"prompt_text":        "hello",
+				"prompt_simple":      "https://cdn.example/ref.wav",
+				"emo_control_method": "使用情感向量控制",
+				"emo_happy":          float64(0.5),
+			},
+		},
+		{
 			name:   "image and audio drive the length",
 			model:  "minimax_h3_image_audio_to_video",
 			action: "image_to_video",
@@ -276,6 +310,35 @@ func TestComfyUIDurationBoundsFollowWorkflow(t *testing.T) {
 			require.Error(t, err, "%s %v", testCase.model, testCase.seconds)
 		} else {
 			require.NoError(t, err, "%s %v", testCase.model, testCase.seconds)
+		}
+	}
+}
+
+// AutoDL caps seeds per workflow; minimax_h3_804 alone accepts the wider range.
+func TestComfyUISeedBoundsFollowWorkflow(t *testing.T) {
+	plugin := newComfyPlugin(t)
+	cases := []struct {
+		model   string
+		seed    any
+		wantErr bool
+	}{
+		{"minimax_h3_801", 999999999999999, false},
+		{"minimax_h3_801", 1000000000000000, true},
+		{"minimax_h3_804", 100000000000000000, false},
+		{"minimax_h3_zm_u22", 0, false},
+		{"minimax_h3_zm_u22", -1, true},
+	}
+	for _, testCase := range cases {
+		value := map[string]any{"model": testCase.model, "prompt": "x", "seed": testCase.seed}
+		_, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+			"model":         testCase.model,
+			"upstreamModel": testCase.model,
+			"body":          map[string]any{"kind": "json", "value": value},
+		})
+		if testCase.wantErr {
+			require.Error(t, err, "%s %v", testCase.model, testCase.seed)
+		} else {
+			require.NoError(t, err, "%s %v", testCase.model, testCase.seed)
 		}
 	}
 }
@@ -640,6 +703,95 @@ func TestComfyUIBillsOnlyMeteredUsage(t *testing.T) {
 	schema, _ := plugin.Meta.UsageForModel(comfyVideoModel)
 	assert.Equal(t, "second", schema["seconds"].Unit)
 	assert.Equal(t, "count", schema["media_inputs"].Unit)
+}
+
+func comfyParameter(t *testing.T, plugin *jsplugin.LoadedPlugin, model, name string) jsplugin.RequestParameter {
+	t.Helper()
+	for _, parameter := range plugin.Meta.RequestForModel(model) {
+		if parameter.Name == name {
+			return parameter
+		}
+	}
+	require.FailNowf(t, "missing request parameter", "%s has no parameter %q", model, name)
+	return jsplugin.RequestParameter{}
+}
+
+func TestComfyUIRequestSchemaDocumentsEveryModel(t *testing.T) {
+	plugin := newComfyPlugin(t)
+	for _, model := range plugin.Meta.Models {
+		assert.NotEmpty(t, plugin.Meta.RequestForModel(model), "model %s must document its request parameters", model)
+	}
+
+	textToVideo := plugin.Meta.RequestForModel(comfyVideoModel)
+	names := make([]string, 0, len(textToVideo))
+	for _, parameter := range textToVideo {
+		names = append(names, parameter.Name)
+	}
+	assert.Equal(t, []string{"prompt", "duration", "resolution", "seed"}, names)
+
+	prompt := comfyParameter(t, plugin, comfyVideoModel, "prompt")
+	assert.Equal(t, "string", prompt.Type)
+	assert.True(t, prompt.Required)
+	duration := comfyParameter(t, plugin, comfyVideoModel, "duration")
+	assert.Equal(t, "integer", duration.Type)
+	require.NotNil(t, duration.Min)
+	require.NotNil(t, duration.Max)
+	assert.EqualValues(t, 1, *duration.Min)
+	assert.EqualValues(t, 15, *duration.Max)
+	assert.EqualValues(t, 5, duration.Default)
+	resolution := comfyParameter(t, plugin, comfyVideoModel, "resolution")
+	assert.Equal(t, "enum", resolution.Type)
+	assert.Len(t, resolution.Enum, 6)
+	assert.Contains(t, resolution.Enum, "768p竖")
+	assert.Equal(t, "768p竖", resolution.Default)
+	seed := comfyParameter(t, plugin, comfyVideoModel, "seed")
+	require.NotNil(t, seed.Max)
+	assert.EqualValues(t, 999999999999999, *seed.Max)
+
+	// 804 keeps the vendor's larger seed bound; zm_u22 starts seeds at zero.
+	wideSeed := comfyParameter(t, plugin, "minimax_h3_804", "seed")
+	require.NotNil(t, wideSeed.Max)
+	assert.EqualValues(t, 100000000000000000, *wideSeed.Max)
+	assert.Equal(t, "string", comfyParameter(t, plugin, "minimax_h3_804", "style_preset").Type)
+	zmSeed := comfyParameter(t, plugin, "minimax_h3_zm_u22", "seed")
+	require.NotNil(t, zmSeed.Min)
+	assert.EqualValues(t, 0, *zmSeed.Min)
+
+	// The audio-driven workflow exposes audio_duration instead of duration.
+	audioDuration := comfyParameter(t, plugin, "minimax_h3_image_audio_to_video", "audio_duration")
+	require.NotNil(t, audioDuration.Max)
+	assert.EqualValues(t, 15, *audioDuration.Max)
+
+	// Retargeting has no prompt or duration input; both media slots are required.
+	retargeting := plugin.Meta.RequestForModel(comfyRetargetingModel)
+	require.Len(t, retargeting, 4)
+	assert.Equal(t, "resolution", retargeting[0].Name)
+	assert.Equal(t, "seed", retargeting[1].Name)
+	assert.Equal(t, "ref_image", retargeting[2].Name)
+	assert.True(t, retargeting[2].Required)
+	assert.Equal(t, "ref_video", retargeting[3].Name)
+	assert.True(t, retargeting[3].Required)
+
+	tts := plugin.Meta.RequestForModel(comfyTTSModel)
+	assert.Equal(t, "prompt_text", tts[0].Name)
+	assert.True(t, tts[0].Required)
+	require.NotNil(t, tts[0].MinLength)
+	assert.EqualValues(t, 1, *tts[0].MinLength)
+	assert.Equal(t, "prompt_simple", tts[1].Name)
+	assert.True(t, tts[1].Required)
+	control := comfyParameter(t, plugin, comfyTTSModel, "emo_control_method")
+	assert.Equal(t, "enum", control.Type)
+	assert.Len(t, control.Enum, 3)
+	assert.Equal(t, "与音色参考音频相同", control.Default)
+	random := comfyParameter(t, plugin, comfyTTSModel, "emo_random")
+	assert.Equal(t, "boolean", random.Type)
+	assert.Equal(t, false, random.Default)
+	for _, name := range []string{"emo_happy", "emo_angry", "emo_sad", "emo_afraid", "emo_disgusted", "emo_melancholic", "emo_surprised", "emo_calm"} {
+		emotion := comfyParameter(t, plugin, comfyTTSModel, name)
+		assert.Equal(t, "number", emotion.Type)
+		require.NotNil(t, emotion.Max)
+		assert.EqualValues(t, 1.4, *emotion.Max)
+	}
 }
 
 func TestComfyUIu22UsesWorkflowSubmitAndResultUrls(t *testing.T) {

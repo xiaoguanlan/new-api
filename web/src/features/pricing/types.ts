@@ -65,6 +65,32 @@ export type BillingPluginVariant = {
   billing_usage_examples?: BillingUsageExample[]
 }
 
+export type RequestParameterType =
+  | 'string'
+  | 'integer'
+  | 'number'
+  | 'boolean'
+  | 'enum'
+  | 'object'
+  | 'array'
+
+/**
+ * One client request member a task-plugin model accepts. Display-only: the
+ * gateway never validates a relay request against it.
+ */
+export type RequestParameter = {
+  name: string
+  type: RequestParameterType
+  required?: boolean
+  description?: string | Record<string, string>
+  default?: unknown
+  enum?: string[]
+  min?: number
+  max?: number
+  minLength?: number
+  maxLength?: number
+}
+
 export type PricingModel = {
   billing_plugin_variants?: BillingPluginVariant[]
   id: number
@@ -97,6 +123,8 @@ export type PricingModel = {
   billing_usage_schema?: BillingUsageSchema
   /** Display-only labeled usage vectors for pricing examples. */
   billing_usage_examples?: BillingUsageExample[]
+  /** Display-only per-model request members declared by the executing plugin. */
+  request_parameters?: RequestParameter[]
   /** Pricing version returned by backend, useful for cache busting */
   pricing_version?: string
   /**

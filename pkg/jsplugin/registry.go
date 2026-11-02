@@ -84,28 +84,29 @@ func (t *LocalizedText) UnmarshalJSON(data []byte) error {
 }
 
 type Meta struct {
-	RequiredCapabilities []string                    `json:"requiredCapabilities,omitempty"`
-	SubmitResponseTypes  []string                    `json:"submitResponseTypes,omitempty"`
-	SortPriority         int                         `json:"sortPriority,omitempty"`
-	Website              string                      `json:"website,omitempty"`
-	APIVersion           int                         `json:"apiVersion"`
-	Key                  string                      `json:"key"`
-	Name                 string                      `json:"name"`
-	Icon                 string                      `json:"icon,omitempty"`
-	Description          LocalizedText               `json:"description,omitempty"`
-	Version              string                      `json:"version"`
-	Author               AuthorMeta                  `json:"author"`
-	BaseURL              string                      `json:"baseUrl,omitempty"`
-	ChannelTypes         []int                       `json:"channelTypes,omitempty"`
-	Models               []string                    `json:"models"`
-	FetchMode            string                      `json:"fetchMode"`
-	AllowedHosts         []string                    `json:"allowedHosts"`
-	Upstreams            []string                    `json:"upstreams,omitempty"`
-	Routes               []Route                     `json:"routes"`
-	Protocols            []ProtocolClaim             `json:"protocols"`
-	UsageSchema          map[string]UsageFieldSchema `json:"usageSchema,omitempty"`
-	UsageExamples        []UsageExample              `json:"usageExamples,omitempty"`
-	UsageProfiles        []UsageProfile              `json:"usageProfiles,omitempty"`
+	RequiredCapabilities []string                      `json:"requiredCapabilities,omitempty"`
+	SubmitResponseTypes  []string                      `json:"submitResponseTypes,omitempty"`
+	SortPriority         int                           `json:"sortPriority,omitempty"`
+	Website              string                        `json:"website,omitempty"`
+	APIVersion           int                           `json:"apiVersion"`
+	Key                  string                        `json:"key"`
+	Name                 string                        `json:"name"`
+	Icon                 string                        `json:"icon,omitempty"`
+	Description          LocalizedText                 `json:"description,omitempty"`
+	Version              string                        `json:"version"`
+	Author               AuthorMeta                    `json:"author"`
+	BaseURL              string                        `json:"baseUrl,omitempty"`
+	ChannelTypes         []int                         `json:"channelTypes,omitempty"`
+	Models               []string                      `json:"models"`
+	FetchMode            string                        `json:"fetchMode"`
+	AllowedHosts         []string                      `json:"allowedHosts"`
+	Upstreams            []string                      `json:"upstreams,omitempty"`
+	Routes               []Route                       `json:"routes"`
+	Protocols            []ProtocolClaim               `json:"protocols"`
+	UsageSchema          map[string]UsageFieldSchema   `json:"usageSchema,omitempty"`
+	UsageExamples        []UsageExample                `json:"usageExamples,omitempty"`
+	UsageProfiles        []UsageProfile                `json:"usageProfiles,omitempty"`
+	RequestSchema        map[string][]RequestParameter `json:"requestSchema,omitempty"`
 	// NoConstantCharge hides the fixed per-request charge from the visual task
 	// pricing editor: the plugin bills only for metered usage.
 	NoConstantCharge bool     `json:"noConstantCharge,omitempty"`
@@ -178,6 +179,18 @@ func (m Meta) UsageForModels(models ...string) (map[string]UsageFieldSchema, []U
 	return m.UsageSchema, m.UsageExamples
 }
 
+// RequestForModel returns the documented request parameters for a declared
+// model. Callers resolve channel aliases to the declared name first.
+func (m Meta) RequestForModel(model string) []RequestParameter {
+	folded := asciiFold(model)
+	for _, declared := range m.Models {
+		if asciiFold(declared) == folded {
+			return m.RequestSchema[declared]
+		}
+	}
+	return nil
+}
+
 // ProtocolSupports reports whether the named protocol claim includes mode.
 func (m Meta) ProtocolSupports(protocol, mode string) bool {
 	for _, claim := range m.Protocols {
@@ -214,6 +227,22 @@ type UsageFieldSchema struct {
 	Enum        []string                 `json:"enum,omitempty"`
 	Description LocalizedText            `json:"description,omitempty"`
 	EnumLabels  map[string]LocalizedText `json:"enumLabels,omitempty"`
+}
+
+// RequestParameter documents one client request member a plugin model accepts.
+// It is display metadata for the model catalog; the host never validates a
+// relay request against it.
+type RequestParameter struct {
+	Name        string        `json:"name"`
+	Type        string        `json:"type"`
+	Required    bool          `json:"required,omitempty"`
+	Description LocalizedText `json:"description,omitempty"`
+	Default     any           `json:"default,omitempty"`
+	Enum        []string      `json:"enum,omitempty"`
+	Min         *float64      `json:"min,omitempty"`
+	Max         *float64      `json:"max,omitempty"`
+	MinLength   *int          `json:"minLength,omitempty"`
+	MaxLength   *int          `json:"maxLength,omitempty"`
 }
 
 type LoadedPlugin struct {
@@ -898,6 +927,7 @@ func cloneMeta(meta Meta) Meta {
 	}
 	meta.UsageSchema = CloneUsageSchema(meta.UsageSchema)
 	meta.UsageExamples = CloneUsageExamples(meta.UsageExamples)
+	meta.RequestSchema = CloneRequestSchema(meta.RequestSchema)
 	meta.UsageProfiles = append([]UsageProfile(nil), meta.UsageProfiles...)
 	for index := range meta.UsageProfiles {
 		profile := &meta.UsageProfiles[index]
@@ -930,6 +960,50 @@ func CloneUsageSchema(schema map[string]UsageFieldSchema) map[string]UsageFieldS
 			field.EnumLabels = labels
 		}
 		cloned[key] = field
+	}
+	return cloned
+}
+
+// CloneRequestSchema copies request parameter declarations for independent
+// readers.
+func CloneRequestSchema(schema map[string][]RequestParameter) map[string][]RequestParameter {
+	if schema == nil {
+		return nil
+	}
+	cloned := make(map[string][]RequestParameter, len(schema))
+	for model, parameters := range schema {
+		cloned[model] = CloneRequestParameters(parameters)
+	}
+	return cloned
+}
+
+// CloneRequestParameters copies parameter declarations and their localized
+// display metadata.
+func CloneRequestParameters(parameters []RequestParameter) []RequestParameter {
+	if parameters == nil {
+		return nil
+	}
+	cloned := make([]RequestParameter, len(parameters))
+	for index, parameter := range parameters {
+		cloned[index] = parameter
+		cloned[index].Description = maps.Clone(parameter.Description)
+		cloned[index].Enum = slices.Clone(parameter.Enum)
+		if parameter.Min != nil {
+			value := *parameter.Min
+			cloned[index].Min = &value
+		}
+		if parameter.Max != nil {
+			value := *parameter.Max
+			cloned[index].Max = &value
+		}
+		if parameter.MinLength != nil {
+			value := *parameter.MinLength
+			cloned[index].MinLength = &value
+		}
+		if parameter.MaxLength != nil {
+			value := *parameter.MaxLength
+			cloned[index].MaxLength = &value
+		}
 	}
 	return cloned
 }
@@ -1025,7 +1099,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "noConstantCharge", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "requestSchema", "noConstantCharge", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1135,6 +1209,12 @@ func decodeMeta(value any) (Meta, error) {
 	meta.Protocols, err = decodeProtocolClaims(object, "protocols")
 	if err != nil {
 		return Meta{}, err
+	}
+	if requestSchema, exists := object["requestSchema"]; exists {
+		meta.RequestSchema, err = decodeRequestSchema(requestSchema, meta.Models)
+		if err != nil {
+			return Meta{}, err
+		}
 	}
 	if usageSchema, exists := object["usageSchema"]; exists {
 		meta.UsageSchema, err = decodeUsageSchema(usageSchema)
@@ -1570,6 +1650,252 @@ func decodeUsageSchema(value any) (map[string]UsageFieldSchema, error) {
 		schema[name] = field
 	}
 	return schema, nil
+}
+
+const (
+	maxRequestSchemaModels       = 128
+	maxRequestParametersPerModel = 128
+	maxRequestParameterRunes     = 256
+)
+
+var requestParameterTypes = []string{"string", "integer", "number", "boolean", "enum", "object", "array"}
+
+// decodeRequestSchema reads the display-only request contract of each declared
+// model. It never participates in relay validation or billing.
+func decodeRequestSchema(value any, models []string) (map[string][]RequestParameter, error) {
+	if value == nil {
+		return nil, fmt.Errorf("plugin meta requestSchema must be an object")
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("plugin meta requestSchema must be an object")
+	}
+	if len(object) > maxRequestSchemaModels {
+		return nil, fmt.Errorf("plugin meta requestSchema must not declare more than %d models", maxRequestSchemaModels)
+	}
+	declared := make(map[string]string, len(models))
+	for _, model := range models {
+		declared[asciiFold(model)] = model
+	}
+	schema := make(map[string][]RequestParameter, len(object))
+	seen := make(map[string]struct{}, len(object))
+	for model, rawParameters := range object {
+		canonical, exists := declared[asciiFold(model)]
+		if !exists {
+			return nil, fmt.Errorf("plugin meta requestSchema model %q is not declared in models", model)
+		}
+		if _, duplicate := seen[asciiFold(model)]; duplicate {
+			return nil, fmt.Errorf("plugin meta requestSchema model %q is declared more than once", model)
+		}
+		seen[asciiFold(model)] = struct{}{}
+		items, ok := rawParameters.([]any)
+		if !ok {
+			return nil, fmt.Errorf("plugin meta requestSchema model %q must be an array", model)
+		}
+		if len(items) > maxRequestParametersPerModel {
+			return nil, fmt.Errorf("plugin meta requestSchema model %q must not declare more than %d parameters", model, maxRequestParametersPerModel)
+		}
+		parameters := make([]RequestParameter, 0, len(items))
+		seen := make(map[string]struct{}, len(items))
+		for index, item := range items {
+			parameter, err := decodeRequestParameter(item)
+			if err != nil {
+				return nil, fmt.Errorf("plugin meta requestSchema model %q parameter %d: %w", model, index+1, err)
+			}
+			if _, exists := seen[parameter.Name]; exists {
+				return nil, fmt.Errorf("plugin meta requestSchema model %q parameter names must be unique", model)
+			}
+			seen[parameter.Name] = struct{}{}
+			parameters = append(parameters, parameter)
+		}
+		schema[canonical] = parameters
+	}
+	return schema, nil
+}
+
+func decodeRequestParameter(value any) (RequestParameter, error) {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return RequestParameter{}, fmt.Errorf("must be an object")
+	}
+	for key := range object {
+		switch key {
+		case "name", "type", "required", "description", "default", "enum", "min", "max", "minLength", "maxLength":
+		default:
+			return RequestParameter{}, fmt.Errorf("has unknown property %q", key)
+		}
+	}
+	parameter := RequestParameter{}
+	var err error
+	if parameter.Name, err = stringMetaField(object, "name"); err != nil {
+		return RequestParameter{}, err
+	}
+	parameter.Name = strings.TrimSpace(parameter.Name)
+	if parameter.Name == "" {
+		return RequestParameter{}, fmt.Errorf("name is required")
+	}
+	if parameter.Type, err = stringMetaField(object, "type"); err != nil {
+		return RequestParameter{}, err
+	}
+	if !slices.Contains(requestParameterTypes, parameter.Type) {
+		return RequestParameter{}, fmt.Errorf("type must be one of %s", strings.Join(requestParameterTypes, ", "))
+	}
+	if parameter.Required, err = boolMetaField(object, "required"); err != nil {
+		return RequestParameter{}, err
+	}
+	if parameter.Description, err = localizedTextMetaField(object, "description", maxRequestParameterRunes); err != nil {
+		return RequestParameter{}, err
+	}
+	if _, exists := object["enum"]; exists {
+		if parameter.Enum, err = strictStringSlice(object, "enum"); err != nil {
+			return RequestParameter{}, err
+		}
+	}
+	if parameter.Min, err = numberMetaField(object, "min"); err != nil {
+		return RequestParameter{}, err
+	}
+	if parameter.Max, err = numberMetaField(object, "max"); err != nil {
+		return RequestParameter{}, err
+	}
+	if _, exists := object["minLength"]; exists {
+		value, err := integerMetaField(object, "minLength")
+		if err != nil {
+			return RequestParameter{}, err
+		}
+		parameter.MinLength = &value
+	}
+	if _, exists := object["maxLength"]; exists {
+		value, err := integerMetaField(object, "maxLength")
+		if err != nil {
+			return RequestParameter{}, err
+		}
+		parameter.MaxLength = &value
+	}
+	if rawDefault, exists := object["default"]; exists && rawDefault != nil {
+		parameter.Default = rawDefault
+	}
+	if err := validateRequestParameter(parameter); err != nil {
+		return RequestParameter{}, err
+	}
+	return parameter, nil
+}
+
+func validateRequestParameter(parameter RequestParameter) error {
+	hasRange := parameter.Min != nil || parameter.Max != nil
+	hasLength := parameter.MinLength != nil || parameter.MaxLength != nil
+	switch parameter.Type {
+	case "enum":
+		if len(parameter.Enum) == 0 {
+			return fmt.Errorf("enum parameters must declare at least one value")
+		}
+		if hasRange || hasLength {
+			return fmt.Errorf("enum parameters cannot declare min, max, minLength, or maxLength")
+		}
+		values := make(map[string]struct{}, len(parameter.Enum))
+		for _, value := range parameter.Enum {
+			if _, exists := values[value]; exists {
+				return fmt.Errorf("enum values must be unique")
+			}
+			values[value] = struct{}{}
+		}
+		if parameter.Default != nil {
+			value, ok := parameter.Default.(string)
+			if !ok {
+				return fmt.Errorf("enum default must be a string")
+			}
+			if _, exists := values[value]; !exists {
+				return fmt.Errorf("enum default %q is not a declared value", value)
+			}
+		}
+	case "number", "integer":
+		if len(parameter.Enum) != 0 || hasLength {
+			return fmt.Errorf("%s parameters cannot declare enum, minLength, or maxLength", parameter.Type)
+		}
+		if parameter.Min != nil && parameter.Max != nil && *parameter.Min > *parameter.Max {
+			return fmt.Errorf("min must not exceed max")
+		}
+		if parameter.Type == "integer" {
+			if parameter.Min != nil && math.Trunc(*parameter.Min) != *parameter.Min {
+				return fmt.Errorf("integer min must be an integer")
+			}
+			if parameter.Max != nil && math.Trunc(*parameter.Max) != *parameter.Max {
+				return fmt.Errorf("integer max must be an integer")
+			}
+		}
+		if parameter.Default != nil {
+			value, ok := requestParameterNumber(parameter.Default)
+			if !ok {
+				return fmt.Errorf("%s default must be a number", parameter.Type)
+			}
+			if parameter.Type == "integer" && math.Trunc(value) != value {
+				return fmt.Errorf("integer default must be an integer")
+			}
+			if parameter.Min != nil && value < *parameter.Min {
+				return fmt.Errorf("default must not be below min")
+			}
+			if parameter.Max != nil && value > *parameter.Max {
+				return fmt.Errorf("default must not exceed max")
+			}
+		}
+	case "boolean":
+		if len(parameter.Enum) != 0 || hasRange || hasLength {
+			return fmt.Errorf("boolean parameters cannot declare enum, min, max, minLength, or maxLength")
+		}
+		if parameter.Default != nil {
+			if _, ok := parameter.Default.(bool); !ok {
+				return fmt.Errorf("boolean default must be true or false")
+			}
+		}
+	case "string":
+		if len(parameter.Enum) != 0 || hasRange {
+			return fmt.Errorf("string parameters cannot declare enum, min, or max")
+		}
+		if parameter.MinLength != nil && *parameter.MinLength < 0 {
+			return fmt.Errorf("minLength must not be negative")
+		}
+		if parameter.MaxLength != nil && *parameter.MaxLength < 0 {
+			return fmt.Errorf("maxLength must not be negative")
+		}
+		if parameter.MinLength != nil && parameter.MaxLength != nil && *parameter.MinLength > *parameter.MaxLength {
+			return fmt.Errorf("minLength must not exceed maxLength")
+		}
+		if parameter.Default != nil {
+			if _, ok := parameter.Default.(string); !ok {
+				return fmt.Errorf("string default must be a string")
+			}
+		}
+	case "object", "array":
+		if len(parameter.Enum) != 0 || hasRange || hasLength || parameter.Default != nil {
+			return fmt.Errorf("%s parameters cannot declare enum, bounds, or a default", parameter.Type)
+		}
+	}
+	return nil
+}
+
+func numberMetaField(object map[string]any, name string) (*float64, error) {
+	value, exists := object[name]
+	if !exists {
+		return nil, nil
+	}
+	number, ok := requestParameterNumber(value)
+	if !ok {
+		return nil, fmt.Errorf("plugin meta %s must be a finite number", name)
+	}
+	return &number, nil
+}
+
+func requestParameterNumber(value any) (float64, bool) {
+	switch number := value.(type) {
+	case int64:
+		return float64(number), true
+	case float64:
+		if math.IsNaN(number) || math.IsInf(number, 0) {
+			return 0, false
+		}
+		return number, true
+	default:
+		return 0, false
+	}
 }
 
 func validateUsageFieldSchema(name string, field UsageFieldSchema) error {

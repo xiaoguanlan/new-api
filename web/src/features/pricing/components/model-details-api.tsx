@@ -39,6 +39,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStatus } from '@/hooks/use-status'
+import { resolveLocalizedText } from '@/lib/localized-text'
 
 import {
   buildRateLimits,
@@ -47,7 +48,7 @@ import {
   type SupportedParameter,
 } from '../lib/mock-stats'
 import { replaceModelInPath } from '../lib/model-helpers'
-import type { PricingModel } from '../types'
+import type { PricingModel, RequestParameter } from '../types'
 
 // ---------------------------------------------------------------------------
 // Code-sample registry
@@ -109,7 +110,7 @@ function buildChatSample(lang: Lang, ctx: SampleContext): string {
       `curl ${url} \\`,
       `  -H "Authorization: Bearer $${ctx.apiKeyEnv}" \\`,
       `  -H "Content-Type: application/json" \\`,
-      `  -d '${bodyJson.replace(/\n/g, '\n     ')}'`,
+      `  -d '${bodyJson.replaceAll('\n', '\n     ')}'`,
     ].join('\n')
   }
 
@@ -177,7 +178,7 @@ function buildAnthropicSample(lang: Lang, ctx: SampleContext): string {
       `  -H "x-api-key: $${ctx.apiKeyEnv}" \\`,
       `  -H "anthropic-version: 2023-06-01" \\`,
       `  -H "Content-Type: application/json" \\`,
-      `  -d '${body.replace(/\n/g, '\n     ')}'`,
+      `  -d '${body.replaceAll('\n', '\n     ')}'`,
     ].join('\n')
   }
   if (lang === 'python') {
@@ -249,7 +250,7 @@ function buildGeminiSample(lang: Lang, ctx: SampleContext): string {
     return [
       `curl '${url}' \\`,
       `  -H 'Content-Type: application/json' \\`,
-      `  -d '${body.replace(/\n/g, '\n     ')}'`,
+      `  -d '${body.replaceAll('\n', '\n     ')}'`,
     ].join('\n')
   }
   if (lang === 'python') {
@@ -299,7 +300,7 @@ function buildEmbeddingSample(lang: Lang, ctx: SampleContext): string {
       `curl ${url} \\`,
       `  -H "Authorization: Bearer $${ctx.apiKeyEnv}" \\`,
       `  -H "Content-Type: application/json" \\`,
-      `  -d '${body.replace(/\n/g, '\n     ')}'`,
+      `  -d '${body.replaceAll('\n', '\n     ')}'`,
     ].join('\n')
   }
   if (lang === 'python') {
@@ -365,7 +366,7 @@ function buildImageSample(lang: Lang, ctx: SampleContext): string {
       `curl ${url} \\`,
       `  -H "Authorization: Bearer $${ctx.apiKeyEnv}" \\`,
       `  -H "Content-Type: application/json" \\`,
-      `  -d '${body.replace(/\n/g, '\n     ')}'`,
+      `  -d '${body.replaceAll('\n', '\n     ')}'`,
     ].join('\n')
   }
   if (lang === 'python') {
@@ -423,15 +424,107 @@ function buildImageSample(lang: Lang, ctx: SampleContext): string {
   ].join('\n')
 }
 
+function taskStringSample(name: string): string {
+  if (name.includes('audio')) return 'https://example.com/reference.wav'
+  if (name.includes('video')) return 'https://example.com/reference.mp4'
+  if (name.includes('image') || name.includes('frame')) {
+    return 'https://example.com/reference.png'
+  }
+  if (name.includes('prompt')) return 'A serene mountain lake at sunrise.'
+  return ''
+}
+
+function taskSampleValue(param: RequestParameter): unknown {
+  if (param.type === 'enum') return param.default ?? param.enum?.[0]
+  if (param.default !== undefined) return param.default
+  if (!param.required) return undefined
+  if (param.type === 'boolean') return false
+  if (param.type === 'integer' || param.type === 'number') {
+    return param.min ?? 0
+  }
+  if (param.type === 'string') return taskStringSample(param.name)
+  return undefined
+}
+
+function buildTaskSample(
+  lang: Lang,
+  ctx: SampleContext,
+  parameters: RequestParameter[]
+): string {
+  const url = `${ctx.baseUrl}${ctx.endpointPath}`
+  const body: Record<string, unknown> = { model: ctx.modelName }
+  for (const param of parameters) {
+    const value = taskSampleValue(param)
+    if (value !== undefined) body[param.name] = value
+  }
+  const bodyJson = JSON.stringify(body, null, 2)
+
+  if (lang === 'curl') {
+    return [
+      `curl ${url} \\`,
+      `  -H "Authorization: Bearer $${ctx.apiKeyEnv}" \\`,
+      `  -H "Content-Type: application/json" \\`,
+      `  -d '${bodyJson.replaceAll('\n', '\n     ')}'`,
+    ].join('\n')
+  }
+  if (lang === 'python') {
+    return [
+      'import os',
+      'import requests',
+      '',
+      'response = requests.post(',
+      `    "${url}",`,
+      `    headers={"Authorization": f"Bearer {os.environ['${ctx.apiKeyEnv}']}"},`,
+      '    json={',
+      ...Object.entries(body).map(
+        ([key, value]) => `        "${key}": ${pythonTaskLiteral(value)},`
+      ),
+      '    },',
+      ')',
+      '',
+      'print(response.json())',
+    ].join('\n')
+  }
+  return [
+    `const response = await fetch('${url}', {`,
+    `  method: 'POST',`,
+    `  headers: {`,
+    `    Authorization: \`Bearer \${process.env.${ctx.apiKeyEnv}}\`,`,
+    `    'Content-Type': 'application/json',`,
+    `  },`,
+    `  body: JSON.stringify(${bodyJson}),`,
+    `})`,
+    '',
+    `const data = await response.json()`,
+    `console.log(data)`,
+  ].join('\n')
+}
+
+function pythonTaskLiteral(value: unknown): string {
+  if (value === null) return 'None'
+  if (typeof value === 'boolean') return value ? 'True' : 'False'
+  if (typeof value === 'number') return String(value)
+  return JSON.stringify(value)
+}
+
 function buildSample(
   lang: Lang,
   endpointType: string,
-  ctx: SampleContext
+  ctx: SampleContext,
+  requestParameters?: RequestParameter[]
 ): string {
+  if (
+    endpointType === 'openai-video' &&
+    requestParameters &&
+    requestParameters.length > 0
+  ) {
+    return buildTaskSample(lang, ctx, requestParameters)
+  }
   if (endpointType === 'anthropic') return buildAnthropicSample(lang, ctx)
   if (endpointType === 'gemini') return buildGeminiSample(lang, ctx)
-  if (endpointType === 'embeddings' || endpointType === 'jina-rerank')
+  if (endpointType === 'embeddings' || endpointType === 'jina-rerank') {
     return buildEmbeddingSample(lang, ctx)
+  }
   if (endpointType === 'image-generation') return buildImageSample(lang, ctx)
   return buildChatSample(lang, ctx)
 }
@@ -461,6 +554,12 @@ function CodeSamplesSection(props: {
   }, [status])
 
   const endpoints = useMemo(() => {
+    // Task plugins declare their request contract per model. Their channel
+    // type infers a chat endpoint, which would print a misleading sample, so
+    // point them at the host video protocol they are served on.
+    if (props.model.request_parameters?.length) {
+      return [{ type: 'openai-video', path: '/v1/videos', method: 'POST' }]
+    }
     const types = props.model.supported_endpoint_types || []
     return types
       .map((type) => {
@@ -487,13 +586,18 @@ function CodeSamplesSection(props: {
     return null
   }
 
-  const code = buildSample(lang, activeEndpoint.type, {
-    baseUrl,
-    apiKeyEnv: 'NEW_API_KEY',
-    modelName: props.model.model_name || '',
-    endpointType: activeEndpoint.type,
-    endpointPath: activeEndpoint.path,
-  })
+  const code = buildSample(
+    lang,
+    activeEndpoint.type,
+    {
+      baseUrl,
+      apiKeyEnv: 'NEW_API_KEY',
+      modelName: props.model.model_name || '',
+      endpointType: activeEndpoint.type,
+      endpointPath: activeEndpoint.path,
+    },
+    props.model.request_parameters
+  )
 
   return (
     <section>
@@ -551,6 +655,15 @@ function CodeSamplesSection(props: {
 // ---------------------------------------------------------------------------
 // Supported parameters table
 // ---------------------------------------------------------------------------
+
+function ParamDescriptionCell(props: { param: SupportedParameter }) {
+  const { t, i18n } = useTranslation()
+  if (props.param.description !== undefined) {
+    const text = resolveLocalizedText(props.param.description, i18n.language)
+    if (text) return text
+  }
+  return props.param.descriptionKey ? t(props.param.descriptionKey) : null
+}
 
 function SupportedParametersSection(props: { model: PricingModel }) {
   const { t } = useTranslation()
@@ -616,7 +729,7 @@ function SupportedParametersSection(props: { model: PricingModel }) {
             header: t('Description'),
             className: 'h-9',
             cellClassName: tableStyles.topMutedCell,
-            cell: (p) => t(p.descriptionKey),
+            cell: (p) => <ParamDescriptionCell param={p} />,
           },
         ]}
       />

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { PricingModel } from '../types'
+import type { PricingModel, RequestParameter } from '../types'
 import {
   hashStringToSeed,
   randomInRange,
@@ -315,8 +315,7 @@ export function buildGroupPerformance(model: PricingModel): GroupPerformance[] {
   const spec = PROFILE_SPECS[profile]
   const baseSeed = hashStringToSeed(model.model_name)
 
-  return targets
-    .slice()
+  return [...targets]
     .sort((a, b) => a.localeCompare(b))
     .map<GroupPerformance>((group) => {
       const rand = seededRandom(baseSeed ^ hashStringToSeed(group))
@@ -508,7 +507,9 @@ export type SupportedParameter = {
   defaultValue?: string | number | boolean
   range?: string
   enumValues?: string[]
-  descriptionKey: string
+  descriptionKey?: string
+  /** Localized copy declared by the executing task plugin. */
+  description?: string | Record<string, string>
   required?: boolean
 }
 
@@ -782,6 +783,43 @@ function apiCategoryOf(model: PricingModel): ApiCategory {
   return 'chat'
 }
 
+function parameterRange(param: RequestParameter): string | undefined {
+  if (param.min !== undefined && param.max !== undefined) {
+    return `${param.min} ~ ${param.max}`
+  }
+  if (param.min !== undefined) return `>= ${param.min}`
+  if (param.max !== undefined) return `<= ${param.max}`
+  if (param.minLength !== undefined && param.maxLength !== undefined) {
+    return `${param.minLength} ~ ${param.maxLength}`
+  }
+  if (param.minLength !== undefined) return `>= ${param.minLength}`
+  if (param.maxLength !== undefined) return `<= ${param.maxLength}`
+  return undefined
+}
+
+function scalarDefault(value: unknown): string | number | boolean | undefined {
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+  return undefined
+}
+
+function declaredParameter(param: RequestParameter): SupportedParameter {
+  return {
+    name: param.name,
+    type: param.type,
+    required: param.required,
+    defaultValue: scalarDefault(param.default),
+    range: parameterRange(param),
+    enumValues: param.enum,
+    description: param.description,
+  }
+}
+
 /**
  * Build the list of request parameters that the model accepts. The list is
  * shaped per-modality so reasoning, embedding, image, video and chat models
@@ -790,6 +828,11 @@ function apiCategoryOf(model: PricingModel): ApiCategory {
 export function buildSupportedParameters(
   model: PricingModel
 ): SupportedParameter[] {
+  // Task plugins declare their real request contract; never fall back to the
+  // name-based chat/video presets when the catalog provides it.
+  if (model.request_parameters && model.request_parameters.length > 0) {
+    return model.request_parameters.map(declaredParameter)
+  }
   const cat = apiCategoryOf(model)
   if (cat === 'reasoning') return REASONING_PARAMS
   if (cat === 'embedding') return EMBEDDING_PARAMS
@@ -813,12 +856,20 @@ export function buildRateLimits(model: PricingModel): RateLimit[] {
   const baseSeed = hashStringToSeed(`${model.model_name}:rl`)
   const isHeavy = cat === 'image' || cat === 'video'
   const isLight = cat === 'embedding'
-  const baseRpm = isHeavy ? 60 : isLight ? 5_000 : 500
-  const baseTpm = isHeavy ? 0 : isLight ? 1_000_000 : 200_000
-  const baseRpd = isHeavy ? 1_000 : isLight ? 100_000 : 10_000
+  let baseRpm = 500
+  let baseTpm = 200_000
+  let baseRpd = 10_000
+  if (isHeavy) {
+    baseRpm = 60
+    baseTpm = 0
+    baseRpd = 1_000
+  } else if (isLight) {
+    baseRpm = 5_000
+    baseTpm = 1_000_000
+    baseRpd = 100_000
+  }
 
-  return targets
-    .slice()
+  return [...targets]
     .sort((a, b) => a.localeCompare(b))
     .map((group) => {
       const rand = seededRandom(baseSeed ^ hashStringToSeed(group))
@@ -836,7 +887,8 @@ export function buildRateLimits(model: PricingModel): RateLimit[] {
 export function formatRateLimit(value: number): string {
   if (value <= 0) return '—'
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000)
+  if (value >= 1_000) {
     return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}K`
+  }
   return value.toLocaleString()
 }

@@ -84,6 +84,7 @@ type Pricing struct {
 	BillingExpr            string                               `json:"billing_expr,omitempty"`
 	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
 	BillingUsageExamples   []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
+	RequestParameters      []jsplugin.RequestParameter          `json:"request_parameters,omitempty"`
 	PricingVersion         string                               `json:"pricing_version,omitempty"`
 }
 
@@ -437,6 +438,7 @@ func updatePricing() {
 				usageModel,
 			)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
+			pricing.RequestParameters = jsplugin.CloneRequestParameters(plugin.Meta.RequestForModel(usageModel))
 		}
 		providers := pluginGeneration.PluginsByModel(model)
 		hasProviderOverride := false

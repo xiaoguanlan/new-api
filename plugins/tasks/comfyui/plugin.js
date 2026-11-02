@@ -36,10 +36,14 @@ const WORKFLOWS = {
     required: ["prompt"],
     defaultResolution: "768p竖(768*1344)",
     resolutions: [
-      "480p竖(480*864)", "480p横(864*480)",
-      "768p竖(768*1344)", "768p横(1344*768)",
-      "1088p竖(1088*1920)", "1088p横(1920*1088)",
-      "1440p竖(1440*2560)", "1440p横(2560*1440)",
+      "480p竖(480*864)",
+      "480p横(864*480)",
+      "768p竖(768*1344)",
+      "768p横(1344*768)",
+      "1088p竖(1088*1920)",
+      "1088p横(1920*1088)",
+      "1440p竖(1440*2560)",
+      "1440p横(2560*1440)",
     ],
   },
   minimax_h3_b99_001: {
@@ -81,8 +85,14 @@ const WORKFLOWS = {
     extra: ["mode"],
     defaultResolution: "768p竖(768*1376)",
     resolutions: [
-      "480p竖(480*864)", "768p竖(768*1376)", "1088p竖(1088*1920)", "1440p竖(1440*2560)",
-      "480p横(864*480)", "768p横(1376*768)", "1088p横(1920*1088)", "1440p横(2560*1440)",
+      "480p竖(480*864)",
+      "768p竖(768*1376)",
+      "1088p竖(1088*1920)",
+      "1440p竖(1440*2560)",
+      "480p横(864*480)",
+      "768p横(1376*768)",
+      "1088p横(1920*1088)",
+      "1440p横(2560*1440)",
     ],
   },
   minimax_h3_802: {
@@ -93,8 +103,14 @@ const WORKFLOWS = {
     extra: ["mode"],
     defaultResolution: "768p竖(768*1376)",
     resolutions: [
-      "480p竖(480*864)", "768p竖(768*1376)", "1088p竖(1088*1920)", "1440p竖(1440*2560)",
-      "480p横(864*480)", "768p横(1376*768)", "1088p横(1920*1088)", "1440p横(2560*1440)",
+      "480p竖(480*864)",
+      "768p竖(768*1376)",
+      "1088p竖(1088*1920)",
+      "1440p竖(1440*2560)",
+      "480p横(864*480)",
+      "768p横(1376*768)",
+      "1088p横(1920*1088)",
+      "1440p横(2560*1440)",
     ],
   },
   minimax_h3_803: {
@@ -106,8 +122,14 @@ const WORKFLOWS = {
     extra: ["mode"],
     defaultResolution: "768p竖(768*1376)",
     resolutions: [
-      "480p竖(480*864)", "768p竖(768*1376)", "1088p竖(1088*1920)", "1440p竖(1440*2560)",
-      "480p横(864*480)", "768p横(1376*768)", "1088p横(1920*1088)", "1440p横(2560*1440)",
+      "480p竖(480*864)",
+      "768p竖(768*1376)",
+      "1088p竖(1088*1920)",
+      "1440p竖(1440*2560)",
+      "480p横(864*480)",
+      "768p横(1376*768)",
+      "1088p横(1920*1088)",
+      "1440p横(2560*1440)",
     ],
   },
   minimax_h3_804: {
@@ -115,11 +137,18 @@ const WORKFLOWS = {
     maxDuration: 15,
     required: ["prompt"],
     images: 9,
+    seedMax: 100000000000000000,
     extra: ["style_preset"],
     defaultResolution: "768p竖(768*1376)",
     resolutions: [
-      "480p竖(480*864)", "768p竖(768*1376)", "1088p竖(1088*1920)", "1440p竖(1440*2560)",
-      "480p横(864*480)", "768p横(1376*768)", "1088p横(1920*1088)", "1440p横(2560*1440)",
+      "480p竖(480*864)",
+      "768p竖(768*1376)",
+      "1088p竖(1088*1920)",
+      "1440p竖(1440*2560)",
+      "480p横(864*480)",
+      "768p横(1376*768)",
+      "1088p横(1920*1088)",
+      "1440p横(2560*1440)",
     ],
   },
   minimax_h3_805: {
@@ -131,8 +160,14 @@ const WORKFLOWS = {
     extra: ["style_preset"],
     defaultResolution: "768p竖(768*1376)",
     resolutions: [
-      "480p竖(480*864)", "768p竖(768*1376)", "1088p竖(1088*1920)", "1440p竖(1440*2560)",
-      "480p横(864*480)", "768p横(1376*768)", "1088p横(1920*1088)", "1440p横(2560*1440)",
+      "480p竖(480*864)",
+      "768p竖(768*1376)",
+      "1088p竖(1088*1920)",
+      "1440p竖(1440*2560)",
+      "480p横(864*480)",
+      "768p横(1376*768)",
+      "1088p横(1920*1088)",
+      "1440p横(2560*1440)",
     ],
   },
   minimax_h3_z0902: {
@@ -142,10 +177,14 @@ const WORKFLOWS = {
     images: 6,
     defaultResolution: "768p竖(768*1376)",
     resolutions: [
-      "480p竖(480*864)", "480p横(864*480)",
-      "768p竖(768*1376)", "768p横(1376*768)",
-      "1088p竖(1088*1920)", "1088p横(1920*1088)",
-      "1440p竖(1440*2560)", "1440p横(2560*1440)",
+      "480p竖(480*864)",
+      "480p横(864*480)",
+      "768p竖(768*1376)",
+      "768p横(1376*768)",
+      "1088p竖(1088*1920)",
+      "1088p横(1920*1088)",
+      "1440p竖(1440*2560)",
+      "1440p横(2560*1440)",
     ],
   },
   minimax_h3_z0903: {
@@ -156,10 +195,14 @@ const WORKFLOWS = {
     audios: 3,
     defaultResolution: "768p竖(768*1376)",
     resolutions: [
-      "480p竖(480*864)", "480p横(864*480)",
-      "768p竖(768*1376)", "768p横(1376*768)",
-      "1088p竖(1088*1920)", "1088p横(1920*1088)",
-      "1440p竖(1440*2560)", "1440p横(2560*1440)",
+      "480p竖(480*864)",
+      "480p横(864*480)",
+      "768p竖(768*1376)",
+      "768p横(1376*768)",
+      "1088p竖(1088*1920)",
+      "1088p横(1920*1088)",
+      "1440p竖(1440*2560)",
+      "1440p横(2560*1440)",
     ],
   },
   minimax_h3_lightx2v_v5: {
@@ -168,11 +211,7 @@ const WORKFLOWS = {
     required: ["prompt", "ref_image_0"],
     images: 9,
     defaultResolution: "768p竖",
-    resolutions: [
-      "480p竖", "768p竖", "1080p竖",
-      "480p横", "768p横", "1080p横",
-      "480p(1:1)", "768p(1:1)", "1080p(1:1)",
-    ],
+    resolutions: ["480p竖", "768p竖", "1080p竖", "480p横", "768p横", "1080p横", "480p(1:1)", "768p(1:1)", "1080p(1:1)"],
   },
   minimax_h3_lightx2v_v5_15s: {
     action: "reference_to_video",
@@ -307,7 +346,9 @@ const TTS_DEFAULT_CONTROL = "与音色参考音频相同";
 // AutoDL rejects durations outside this range for every video workflow.
 const MIN_DURATION = 1;
 const DEFAULT_DURATION = 5;
-const MAX_SEED = 100000000000000000;
+// Every workflow caps the seed at 999999999999999 except minimax_h3_804,
+// which declares the wider cap in its workflow entry.
+const SEED_MAX = 999999999999999;
 
 // Speech synthesis is billed by generated audio second. AutoDL reports no
 // duration, so it is estimated from the text for the reservation and measured
@@ -328,6 +369,183 @@ const MEDIA_INPUTS_FIELD = {
   description: { en: "Media input unit price", zh: "媒体输入单价" },
 };
 
+// The model catalog renders one request-parameter table per model. These
+// declarations are generated from WORKFLOWS so the documentation cannot drift
+// from the decoder; they are display metadata only.
+const REQUEST_DESCRIPTIONS = {
+  prompt: { en: "Text prompt", zh: "文本提示词" },
+  duration: { en: "Video duration in seconds", zh: "视频时长（秒）" },
+  resolution: { en: "Output resolution", zh: "输出分辨率" },
+  seed: { en: "Random seed", zh: "随机种子" },
+  first_frame: { en: "First frame image URL", zh: "首帧图片 URL" },
+  last_frame: { en: "Last frame image URL", zh: "尾帧图片 URL" },
+  ref_image: { en: "Reference image URL", zh: "参考图片 URL" },
+  ref_video: { en: "Reference video URL", zh: "参考视频 URL" },
+  ref_audio: { en: "Reference audio URL", zh: "参考音频 URL" },
+  mode: { en: "Generation mode", zh: "生成模式" },
+  style_preset: { en: "Style preset", zh: "风格预设" },
+  prompt_text: { en: "Text to synthesize", zh: "待合成文本" },
+  prompt_simple: { en: "Voice reference audio URL", zh: "音色参考音频 URL" },
+  emo_control_method: { en: "Emotion control method", zh: "情感控制方式" },
+  emo_ref_audio: { en: "Emotion reference audio URL", zh: "情感参考音频 URL" },
+  emo_random: { en: "Random emotion", zh: "随机情感" },
+  emo_happy: { en: "Happy weight", zh: "开心权重" },
+  emo_angry: { en: "Angry weight", zh: "愤怒权重" },
+  emo_sad: { en: "Sad weight", zh: "悲伤权重" },
+  emo_afraid: { en: "Afraid weight", zh: "恐惧权重" },
+  emo_disgusted: { en: "Disgusted weight", zh: "厌恶权重" },
+  emo_melancholic: { en: "Melancholic weight", zh: "忧郁权重" },
+  emo_surprised: { en: "Surprised weight", zh: "惊讶权重" },
+  emo_calm: { en: "Calm weight", zh: "平静权重" },
+};
+
+function buildRequestParameters(spec) {
+  const required = new Set(spec.required || []);
+  const parameters = [];
+  if (spec.prompt !== false) {
+    parameters.push({
+      name: "prompt",
+      type: "string",
+      required: required.has("prompt"),
+      description: REQUEST_DESCRIPTIONS.prompt,
+    });
+  }
+  const durationField = spec.durationField || "duration";
+  if (spec.maxDuration !== undefined) {
+    parameters.push({
+      name: durationField,
+      type: "integer",
+      min: MIN_DURATION,
+      max: spec.maxDuration,
+      default: DEFAULT_DURATION,
+      description: REQUEST_DESCRIPTIONS[durationField] || REQUEST_DESCRIPTIONS.duration,
+    });
+  }
+  parameters.push({
+    name: "resolution",
+    type: "enum",
+    enum: spec.resolutions,
+    default: spec.defaultResolution,
+    description: REQUEST_DESCRIPTIONS.resolution,
+  });
+  if (!spec.noSeed) {
+    parameters.push({
+      name: "seed",
+      type: "integer",
+      min: spec.seedMin === undefined ? 1 : spec.seedMin,
+      max: spec.seedMax === undefined ? SEED_MAX : spec.seedMax,
+      description: REQUEST_DESCRIPTIONS.seed,
+    });
+  }
+  if (spec.frames) {
+    for (const name of ["first_frame", "last_frame"]) {
+      parameters.push({
+        name: name,
+        type: "string",
+        required: required.has(name),
+        description: REQUEST_DESCRIPTIONS[name],
+      });
+    }
+  }
+  for (let index = 0; index < (spec.images || 0); index += 1) {
+    const name = "ref_image_" + index;
+    parameters.push({
+      name: name,
+      type: "string",
+      required: required.has(name),
+      description: REQUEST_DESCRIPTIONS.ref_image,
+    });
+  }
+  for (let index = 0; index < (spec.audios || 0); index += 1) {
+    const name = "ref_audio_" + index;
+    parameters.push({
+      name: name,
+      type: "string",
+      required: required.has(name),
+      description: REQUEST_DESCRIPTIONS.ref_audio,
+    });
+  }
+  if (spec.imageInput) {
+    parameters.push({
+      name: spec.imageInput,
+      type: "string",
+      required: required.has(spec.imageInput),
+      description: REQUEST_DESCRIPTIONS.ref_image,
+    });
+  }
+  if (spec.videoInput) {
+    parameters.push({
+      name: spec.videoInput,
+      type: "string",
+      required: required.has(spec.videoInput),
+      description: REQUEST_DESCRIPTIONS.ref_video,
+    });
+  }
+  for (const name of spec.extra || []) {
+    parameters.push({
+      name: name,
+      type: "string",
+      description: REQUEST_DESCRIPTIONS[name] || { en: name },
+    });
+  }
+  return parameters;
+}
+
+function buildTTSRequestParameters() {
+  const parameters = [
+    {
+      name: "prompt_text",
+      type: "string",
+      required: true,
+      minLength: 1,
+      maxLength: 2048,
+      description: REQUEST_DESCRIPTIONS.prompt_text,
+    },
+    {
+      name: "prompt_simple",
+      type: "string",
+      required: true,
+      description: REQUEST_DESCRIPTIONS.prompt_simple,
+    },
+    {
+      name: "emo_control_method",
+      type: "enum",
+      enum: ["与音色参考音频相同", "使用情感参考音频", "使用情感向量控制"],
+      default: TTS_DEFAULT_CONTROL,
+      description: REQUEST_DESCRIPTIONS.emo_control_method,
+    },
+    {
+      name: "emo_ref_audio",
+      type: "string",
+      description: REQUEST_DESCRIPTIONS.emo_ref_audio,
+    },
+    {
+      name: "emo_random",
+      type: "boolean",
+      default: false,
+      description: REQUEST_DESCRIPTIONS.emo_random,
+    },
+  ];
+  // TTS_PARAMS starts with the three non-weight members above.
+  for (const name of TTS_PARAMS.slice(3)) {
+    parameters.push({
+      name: name,
+      type: "number",
+      min: 0,
+      max: 1.4,
+      default: 0,
+      description: REQUEST_DESCRIPTIONS[name],
+    });
+  }
+  return parameters;
+}
+
+const REQUEST_SCHEMA = {};
+for (const model of VIDEO_MODELS) {
+  REQUEST_SCHEMA[model] = buildRequestParameters(WORKFLOWS[model]);
+}
+REQUEST_SCHEMA[TTS_MODEL] = buildTTSRequestParameters();
+
 export const meta = {
   apiVersion: 1,
   key: "comfyui",
@@ -337,7 +555,7 @@ export const meta = {
     en: "AutoDL ComfyUI workflow inference (video generation and speech synthesis)",
     zh: "AutoDL ComfyUI 工作流推理（视频生成与语音合成）",
   },
-  version: "1.3.0",
+  version: "1.3.2",
   author: { name: "AutoDL" },
   models: VIDEO_MODELS.concat([TTS_MODEL]),
   fetchMode: "per_task",
@@ -345,10 +563,7 @@ export const meta = {
   // Generated media is read back from AutoDL's object storage: the audio probe
   // reads WAV headers and the retargeting probe reads MP4 headers there. Add
   // more buckets here if an account stores outputs elsewhere.
-  allowedHosts: [
-    "cg-comfyui-prod.tos-cn-beijing.volces.com",
-    "codewithgpu-test-1310972338.cos.ap-beijing.myqcloud.com",
-  ],
+  allowedHosts: ["cg-comfyui-prod.tos-cn-beijing.volces.com", "codewithgpu-test-1310972338.cos.ap-beijing.myqcloud.com"],
   usageSchema: {
     seconds: {
       type: "number",
@@ -397,9 +612,7 @@ export const meta = {
         },
         media_inputs: MEDIA_INPUTS_FIELD,
       },
-      examples: [
-        { label: "10s · 1 media input", facts: { seconds: 10, media_inputs: 1 } },
-      ],
+      examples: [{ label: "10s · 1 media input", facts: { seconds: 10, media_inputs: 1 } }],
     },
     {
       // The retargeted clip follows the reference video's length and no
@@ -413,15 +626,11 @@ export const meta = {
         },
         media_inputs: MEDIA_INPUTS_FIELD,
       },
-      examples: [
-        { label: "10s · 2 media inputs", facts: { seconds: 10, media_inputs: 2 } },
-      ],
+      examples: [{ label: "10s · 2 media inputs", facts: { seconds: 10, media_inputs: 2 } }],
     },
   ],
-  protocols: [
-    { name: "openai_responses", supports: ["stream", "sync", "background"] },
-    "openai_video",
-  ],
+  requestSchema: REQUEST_SCHEMA,
+  protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
 };
 
 function trimmed(value) {
@@ -559,8 +768,9 @@ function resolveSeed(spec, source) {
   if (source.seed === undefined || source.seed === null) return null;
   const seed = Number(source.seed);
   const minimum = spec.seedMin === undefined ? 1 : spec.seedMin;
-  if (!isInteger(seed) || seed < minimum || seed > MAX_SEED) {
-    throw new Error("seed must be an integer between " + minimum + " and " + MAX_SEED);
+  const maximum = spec.seedMax === undefined ? SEED_MAX : spec.seedMax;
+  if (!isInteger(seed) || seed < minimum || seed > maximum) {
+    throw new Error("seed must be an integer between " + minimum + " and " + maximum);
   }
   return seed;
 }
@@ -582,6 +792,16 @@ function workflowParams(spec) {
 // Maps the OpenAI image reference onto the workflow's first image input.
 function requestSource(model, request) {
   const source = Object.assign({}, request);
+  // /v1/video/generations parses the body into the generic task request, so
+  // workflow-specific members may arrive under metadata. Lift only the fields
+  // this workflow reads; an explicit top-level member always wins.
+  const metadata = plainObject(source.metadata);
+  if (metadata) {
+    const allowed = model === TTS_MODEL ? ["prompt_text", "prompt_simple", "audio"].concat(TTS_PARAMS) : workflowParams(WORKFLOWS[model] || {});
+    for (const key of allowed) {
+      if (source[key] === undefined && metadata[key] !== undefined) source[key] = metadata[key];
+    }
+  }
   if (model === TTS_MODEL) return source;
   const spec = WORKFLOWS[model] || {};
   const reference = trimmed(source.input_reference) || trimmed(source.image);
@@ -825,7 +1045,7 @@ function readBytes(url, range) {
     const response = utils.fetch({ url: url, headers: { Range: range }, responseType: "bytes" });
     if (response.status !== 200 && response.status !== 206) return null;
     return new Uint8Array(response.body);
-  } catch (_error) {
+  } catch {
     return null;
   }
 }
@@ -885,9 +1105,9 @@ function movieHeaderSeconds(bytes, movie) {
     if (ascii(bytes, offset + 4, 4) === "mvhd") {
       const version = bytes[offset + 8];
       const timescale = version === 1 ? bigEndian32(bytes, offset + 28) : bigEndian32(bytes, offset + 20);
-      const duration = version === 1 ? bigEndian64(bytes, offset + 32) : bigEndian32(bytes, offset + 24);
-      if (!(timescale > 0) || !(duration > 0)) return 0;
-      return roundSeconds(duration / timescale);
+      const movieDuration = version === 1 ? bigEndian64(bytes, offset + 32) : bigEndian32(bytes, offset + 24);
+      if (!(timescale > 0) || !(movieDuration > 0)) return 0;
+      return roundSeconds(movieDuration / timescale);
     }
     offset += size;
   }

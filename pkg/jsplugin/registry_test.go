@@ -1209,6 +1209,98 @@ usageProfiles: [{models:["image"], schema:{tokens:{type:"number", unit:"token"}}
 	require.ErrorContains(t, ValidateV1Meta(plugin.Meta), "schema must be an object")
 }
 
+func TestRegistryRequestSchemaByModel(t *testing.T) {
+	source := routingTestPluginSource("request-schema", 0, `["image", "video"]`, `
+requestSchema: {
+  IMAGE: [
+    {name: "prompt", type: "string", required: true, description: {en: "Text prompt", zh: "文本提示词"}, minLength: 1, maxLength: 2048},
+    {name: "resolution", type: "enum", enum: ["720P", "1080P"], default: "720P"},
+    {name: "steps", type: "integer", min: 1, max: 50, default: 20},
+    {name: "seed", type: "number"},
+    {name: "enhance", type: "boolean", default: false},
+    {name: "prompt_embeds", type: "array"},
+    {name: "options", type: "object"},
+  ],
+  video: [{name: "seconds", type: "integer", min: 1, max: 15, default: 5}],
+},`, "")
+	registry := NewRegistry()
+	plugin, err := registry.Register(source, Options{})
+	require.NoError(t, err)
+
+	parameters := plugin.Meta.RequestForModel("image")
+	require.Len(t, parameters, 7)
+	assert.Equal(t, "prompt", parameters[0].Name)
+	assert.True(t, parameters[0].Required)
+	assert.Equal(t, "文本提示词", parameters[0].Description["zh"])
+	require.NotNil(t, parameters[0].MinLength)
+	assert.Equal(t, 1, *parameters[0].MinLength)
+	assert.Equal(t, []string{"720P", "1080P"}, parameters[1].Enum)
+	assert.Equal(t, "720P", parameters[1].Default)
+	assert.Equal(t, "boolean", parameters[4].Type)
+	assert.Equal(t, false, parameters[4].Default)
+	assert.EqualValues(t, 20, parameters[2].Default)
+
+	assert.Len(t, plugin.Meta.RequestForModel("IMAGE"), 7, "model lookup folds ASCII case")
+	require.Len(t, plugin.Meta.RequestForModel("video"), 1)
+	assert.Nil(t, plugin.Meta.RequestForModel("unknown"))
+
+	snapshot := registry.Snapshot()
+	require.Len(t, snapshot.Override, 1)
+	snapshot.Override[0].RequestSchema["image"][0].Description["en"] = "Changed"
+	snapshot.Override[0].RequestSchema["image"][1].Enum[0] = "changed"
+	snapshot.Override[0].RequestSchema["image"][2].Max = nil
+	delete(snapshot.Override[0].RequestSchema, "video")
+
+	parameters = registry.Snapshot().Override[0].RequestForModel("image")
+	assert.Equal(t, "Text prompt", parameters[0].Description["en"])
+	assert.Equal(t, []string{"720P", "1080P"}, parameters[1].Enum)
+	require.NotNil(t, parameters[2].Max)
+	assert.Equal(t, float64(50), *parameters[2].Max)
+	require.Len(t, registry.Snapshot().Override[0].RequestForModel("video"), 1)
+}
+
+func TestRegistryRejectsInvalidRequestSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name, schema, errorText string
+	}{
+		{"null", `null`, "requestSchema must be an object"},
+		{"array", `[]`, "requestSchema must be an object"},
+		{"undeclared model", `{other: []}`, "not declared"},
+		{"duplicate model spellings", `{image: [], IMAGE: []}`, "declared more than once"},
+		{"non-array model entry", `{image: {}}`, "must be an array"},
+		{"unknown property", `{image: [{name: "prompt", type: "string", unit: "second"}]}`, "unknown property"},
+		{"missing name", `{image: [{type: "string"}]}`, "name is required"},
+		{"blank name", `{image: [{name: " ", type: "string"}]}`, "name is required"},
+		{"unknown type", `{image: [{name: "prompt", type: "text"}]}`, "type must be one of"},
+		{"duplicate names", `{image: [{name: "prompt", type: "string"}, {name: "prompt", type: "string"}]}`, "names must be unique"},
+		{"enum without values", `{image: [{name: "mode", type: "enum"}]}`, "at least one value"},
+		{"duplicate enum values", `{image: [{name: "mode", type: "enum", enum: ["a", "a"]}]}`, "enum values must be unique"},
+		{"enum default type", `{image: [{name: "mode", type: "enum", enum: ["a"], default: 1}]}`, "enum default must be a string"},
+		{"enum default undeclared", `{image: [{name: "mode", type: "enum", enum: ["a"], default: "b"}]}`, "not a declared value"},
+		{"enum with bounds", `{image: [{name: "mode", type: "enum", enum: ["a"], min: 1}]}`, "cannot declare min"},
+		{"number with enum", `{image: [{name: "seed", type: "number", enum: ["a"]}]}`, "cannot declare enum"},
+		{"reversed bounds", `{image: [{name: "seed", type: "number", min: 2, max: 1}]}`, "min must not exceed max"},
+		{"fractional integer bound", `{image: [{name: "steps", type: "integer", min: 1.5}]}`, "integer min must be an integer"},
+		{"fractional integer default", `{image: [{name: "steps", type: "integer", default: 1.5}]}`, "integer default must be an integer"},
+		{"default below min", `{image: [{name: "steps", type: "integer", min: 2, default: 1}]}`, "default must not be below min"},
+		{"default above max", `{image: [{name: "steps", type: "integer", max: 2, default: 3}]}`, "default must not exceed max"},
+		{"boolean default type", `{image: [{name: "enhance", type: "boolean", default: "yes"}]}`, "boolean default must be true or false"},
+		{"boolean with bounds", `{image: [{name: "enhance", type: "boolean", max: 1}]}`, "boolean parameters cannot declare"},
+		{"string with bounds", `{image: [{name: "prompt", type: "string", min: 1}]}`, "string parameters cannot declare enum, min, or max"},
+		{"negative length", `{image: [{name: "prompt", type: "string", minLength: -1}]}`, "minLength must not be negative"},
+		{"reversed lengths", `{image: [{name: "prompt", type: "string", minLength: 5, maxLength: 1}]}`, "minLength must not exceed maxLength"},
+		{"string default type", `{image: [{name: "prompt", type: "string", default: 1}]}`, "string default must be a string"},
+		{"object with default", `{image: [{name: "options", type: "object", default: {}}]}`, "cannot declare enum, bounds, or a default"},
+		{"array with length", `{image: [{name: "items", type: "array", maxLength: 2}]}`, "cannot declare enum, bounds, or a default"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := routingTestPluginSource("invalid-request-schema", 0, `["image"]`, `requestSchema: `+tc.schema+`,`, "")
+			_, err := CompilePlugin(source, Options{})
+			require.ErrorContains(t, err, tc.errorText)
+		})
+	}
+}
+
 func TestUpstreamsManifestContract(t *testing.T) {
 	for _, tc := range []struct {
 		name, metadata string

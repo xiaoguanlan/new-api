@@ -67,6 +67,61 @@ func TestPricingCarriesTaskUsageSchemaAndRefreshesWithPluginGeneration(t *testin
 	assert.Equal(t, "count", refreshedPricing["pricing-usage-model"].BillingUsageSchema["clips"].Unit)
 }
 
+func pricingRequestSchemaPluginSource() string {
+	return `
+export const meta = {
+  apiVersion: 1, key: "pricing-request-probe", name: "Pricing Request Probe", version: "1.0.0", author: {name: "Test"},
+  models: ["request-model"], fetchMode: "per_task",
+  requestSchema: {"request-model": [
+    {name: "prompt", type: "string", required: true, description: {en: "Text prompt", zh: "文本提示词"}, minLength: 1, maxLength: 2048},
+    {name: "duration", type: "integer", min: 1, max: 15, default: 5}
+  ]}
+};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+`
+}
+
+func TestPricingCarriesDeclaredRequestParametersIncludingAliases(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	const pluginKey = "pricing-request-probe"
+	_, err := jsplugin.DefaultRegistry.Register(pricingRequestSchemaPluginSource(), jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(pluginKey) })
+
+	mapping := `{"alias-model":"request-model"}`
+	channel := &Channel{
+		Id:           920,
+		Type:         constant.ChannelTypeTaskPlugin,
+		Key:          "key-920",
+		Status:       1,
+		Name:         "channel-920",
+		Models:       "alias-model,request-model,ordinary-model",
+		ModelMapping: &mapping,
+	}
+	require.NoError(t, DB.Create(channel).Error)
+	insertPricingEndpointAbility(t, 920, "alias-model")
+	insertPricingEndpointAbility(t, 920, "request-model")
+	insertPricingEndpointAbility(t, 920, "ordinary-model")
+	InitChannelCache()
+
+	pricing := pricingByModel(GetPricing())
+	for _, model := range []string{"request-model", "alias-model"} {
+		parameters := pricing[model].RequestParameters
+		require.Len(t, parameters, 2, model)
+		assert.Equal(t, "prompt", parameters[0].Name)
+		assert.True(t, parameters[0].Required)
+		assert.Equal(t, "文本提示词", parameters[0].Description["zh"])
+		assert.Equal(t, "integer", parameters[1].Type)
+		require.NotNil(t, parameters[1].Max)
+		assert.EqualValues(t, 15, *parameters[1].Max)
+		assert.EqualValues(t, 5, parameters[1].Default)
+	}
+	assert.Nil(t, pricing["ordinary-model"].RequestParameters)
+}
+
 func TestPricingAliasCarriesPluginUsageSchemaAndTailExpr(t *testing.T) {
 	resetPricingEndpointTestTables(t)
 	const pluginKey = "pricing-usage-probe"
