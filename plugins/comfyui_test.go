@@ -371,6 +371,36 @@ func TestComfyUIRequiresWorkflowInputs(t *testing.T) {
 	}))
 }
 
+// AutoDL downloads the voice references itself and caps the synthesized text,
+// so both are rejected before the task is queued instead of failing upstream
+// once the request has already been accepted.
+func TestComfyUISpeechValidatesInputsLocally(t *testing.T) {
+	plugin := newComfyPlugin(t)
+	sample := "https://cdn.example/reference.wav"
+	submit := func(body map[string]any) error {
+		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+			"baseUrl":       "https://autodl.art",
+			"apiKey":        "token-under-test",
+			"model":         comfyTTSModel,
+			"upstreamModel": comfyTTSModel,
+			"requestBody":   body,
+		})
+		return err
+	}
+
+	require.NoError(t, submit(map[string]any{"prompt_text": "你好", "prompt_simple": sample}))
+	// The OpenAI-style aliases reach the same body and pass the same checks.
+	require.NoError(t, submit(map[string]any{"prompt": "你好", "audio": sample}))
+	// 2048 characters is the vendor limit and stays accepted.
+	require.NoError(t, submit(map[string]any{"prompt_text": strings.Repeat("字", 2048), "prompt_simple": sample}))
+
+	require.Error(t, submit(map[string]any{"prompt_text": "你好"}))
+	require.Error(t, submit(map[string]any{"prompt_text": "你好", "prompt_simple": "reference.wav"}), "relative path")
+	require.Error(t, submit(map[string]any{"prompt_text": "你好", "prompt_simple": "ftp://cdn.example/reference.wav"}), "unsupported scheme")
+	require.Error(t, submit(map[string]any{"prompt_text": "你好", "prompt_simple": sample, "emo_ref_audio": "reference.wav"}))
+	require.Error(t, submit(map[string]any{"prompt_text": strings.Repeat("字", 2049), "prompt_simple": sample}))
+}
+
 // AutoDL resolution labels spell out the frame size, but prices only vary by
 // tier, so the billing facts carry the tier.
 func TestComfyUIResolutionFactsUseTiers(t *testing.T) {

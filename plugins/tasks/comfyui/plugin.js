@@ -357,6 +357,12 @@ const OUTPUT_SECONDS_CAP = 3600;
 const CJK_CHARS_PER_SECOND = 4.5;
 const LATIN_CHARS_PER_SECOND = 15;
 
+// AutoDL caps the synthesized text at 2048 characters and downloads the voice
+// references itself, so a text that is too long or an address that is unusable
+// only fails after the task has been accepted. Both are rejected here instead,
+// where the caller still owns the request.
+const TTS_TEXT_MAX_LENGTH = 2048;
+
 // Images, audio, and video the client attaches to a workflow are billed per
 // asset. Every provided input counts, including the first one; an input the
 // vendor fills from its own default is not an asset the client supplied.
@@ -555,7 +561,7 @@ export const meta = {
     en: "AutoDL ComfyUI workflow inference (video generation and speech synthesis)",
     zh: "AutoDL ComfyUI 工作流推理（视频生成与语音合成）",
   },
-  version: "1.3.2",
+  version: "1.3.3",
   author: { name: "AutoDL" },
   models: VIDEO_MODELS.concat([TTS_MODEL]),
   fetchMode: "per_task",
@@ -901,12 +907,27 @@ function measuredSecondsProbe(model) {
   return spec ? spec.outputSecondsProbe : undefined;
 }
 
+// AutoDL fetches the voice reference itself, so a value that is not an absolute
+// http(s) URL is refused upstream only after the task has been queued. Only the
+// syntax can be checked here: utils.fetch is limited to the channel host and
+// meta.allowedHosts, and a client-supplied CDN is neither.
+function requireMediaUrl(field, value) {
+  if (!/^https?:\/\/\S+$/i.test(trimmed(value))) {
+    throw new Error(field + " must be an absolute http(s) URL");
+  }
+}
+
 export function buildSubmitRequest(ctx) {
   const model = upstreamModelOf(ctx);
   const body = workflowBody(model, requestSource(model, ctx.requestBody || {}));
   if (model === TTS_MODEL) {
     if (!body.prompt_text) throw new Error("prompt_text is required");
+    if (body.prompt_text.length > TTS_TEXT_MAX_LENGTH) {
+      throw new Error("prompt_text must be at most " + TTS_TEXT_MAX_LENGTH + " characters");
+    }
     if (!body.prompt_simple) throw new Error("prompt_simple audio URL is required");
+    requireMediaUrl("prompt_simple", body.prompt_simple);
+    if (body.emo_ref_audio) requireMediaUrl("emo_ref_audio", body.emo_ref_audio);
   } else {
     for (const key of WORKFLOWS[model].required) {
       if (!trimmed(body[key])) throw new Error(key + " is required");
