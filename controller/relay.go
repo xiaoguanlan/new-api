@@ -726,11 +726,15 @@ func executeTaskSubmissionWith(
 	diagnostics.durable(task)
 	diagnostics.settleStart(task, result.Quota)
 
-	if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-		common.SysError(common.LogText("settle task billing error: %s", settleErr.Error()))
-		taskErr = service.TaskErrorWrapperLocal(errors.New("failed to settle task billing"), "task_billing_settlement_failed", http.StatusInternalServerError)
-		diagnostics.failed("settle", "billing_error", taskErr, true)
-		return nil, taskErr
+	// 后付费任务（post_paid_task_models）提交时不冻结、不记消费日志，
+	// 资金在任务完成时由 RecalculateTaskQuota 按实测用量一次性扣减。
+	if !relayInfo.PostPaidTask {
+		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+			common.SysError(common.LogText("settle task billing error: %s", settleErr.Error()))
+			taskErr = service.TaskErrorWrapperLocal(errors.New("failed to settle task billing"), "task_billing_settlement_failed", http.StatusInternalServerError)
+			diagnostics.failed("settle", "billing_error", taskErr, true)
+			return nil, taskErr
+		}
 	}
 	perfmetrics.RecordImmediateTaskResult(relayInfo, result.Immediate)
 	if task.Status != model.TaskStatusFailure {
@@ -738,7 +742,12 @@ func executeTaskSubmissionWith(
 	} else {
 		policy.AddEvent(service.PolicyEvent{Decision: service.PolicyDecision{Action: "stop", Reason: "task_failed", Source: "upstream"}})
 	}
-	service.LogTaskConsumption(c, relayInfo, task)
+	if relayInfo.PostPaidTask {
+		// 后付费任务提交阶段不扣费、不写消费日志，但请求数仍要计入统计。
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, 0)
+	} else {
+		service.LogTaskConsumption(c, relayInfo, task)
+	}
 	diagnostics.complete(task, result.Quota)
 
 	return &taskSubmissionOutcome{Result: result, Task: task, RelayInfo: relayInfo}, nil

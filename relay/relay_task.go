@@ -24,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -333,9 +334,19 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		noteTaskQuotaClamp(info, clamp)
 	}
 
-	// 7. 预扣费：首次尝试创建计费会话；重试时会话已存在，换到更贵的渠道要在
-	//    发起上游请求前补足预扣，余额不足就不发请求。
-	if info.Billing != nil || !info.PriceData.FreeModel {
+	// 7. 计费准入：普通异步任务在提交前冻结全额，余额不足就不发请求；
+	//    quota_setting.post_paid_task_models 列出的模型改为「完成后再扣」，
+	//    提交时只校验余额、不冻结额度，因此全程只产生一条消费日志。
+	// 重试时会话已存在，换到更贵的渠道要在发起上游请求前补足预扣。
+	// 后付费依赖用量表达式在任务完成时求值，按次计费的任务没有快照，
+	// 走这条路会永远不扣费，因此必须要求 snapshot 存在。
+	postPaid := info.TieredBillingSnapshot != nil && operation_setting.IsPostPaidTaskModel(modelName)
+	if postPaid {
+		info.PostPaidTask = true
+		if apiErr := service.AdmitPostPaidTask(c, info, info.PriceData.Quota); apiErr != nil {
+			return nil, service.TaskErrorFromAPIError(apiErr)
+		}
+	} else if info.Billing != nil || !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
 			return nil, service.TaskErrorFromAPIError(apiErr)
@@ -403,12 +414,19 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	info.PriceData.Quota = finalQuota
 
+	// 后付费任务不在提交阶段占用额度：任务行的 Quota 记为 0，
+	// 完成时 RecalculateTaskQuota 的差额就是全额，账单只有一条记录。
+	billedQuota := finalQuota
+	if info.PostPaidTask {
+		billedQuota = 0
+	}
+
 	return &TaskSubmitResult{
 		UpstreamTaskID: parsed.UpstreamTaskID,
 		TaskData:       parsed.TaskData,
 		ClientResponse: parsed.ClientResponse,
 		Platform:       platform,
-		Quota:          finalQuota,
+		Quota:          billedQuota,
 		Immediate:      parsed.Immediate,
 		PluginState:    parsed.PluginState,
 	}, nil

@@ -1108,6 +1108,39 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 	assert.Equal(t, preConsumed-actualQuota, log.Quota)
 }
 
+// 后付费任务（quota_setting.post_paid_task_models）提交时既不冻结额度也不记日志，
+// 任务行 Quota 为 0，因此完成时的差额就是全额：一条日志、金额即实测用量。
+func TestRecalculate_PostPaidChargesFullAmountOnce(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 40, 40, 40
+	const initQuota = 100000
+	const tokenRemain = 50000
+	const actualQuota = 23900 // 4.78 秒 × 0.01 元/秒，500000 quota/元
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-recalc-postpaid", tokenRemain)
+	seedChannel(t, channelID)
+	seedChargedAccounting(t, userID, channelID, tokenID, 0, 0)
+
+	task := makeTask(userID, channelID, 0, tokenID, BillingSourceWallet, 0)
+
+	RecalculateTaskQuota(ctx, task, actualQuota, common.NewMessage("Settled by the task usage expression"))
+
+	assert.Equal(t, initQuota-actualQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain-actualQuota, getTokenRemainQuota(t, tokenID))
+	usedQuota, _ := getUserUsageAccounting(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, int64(actualQuota), getChannelUsedQuota(t, channelID))
+	assert.Equal(t, actualQuota, task.Quota)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, actualQuota, log.Quota, "post-paid tasks record the full amount in a single consume log")
+}
+
 func TestRecalculate_ZeroDelta(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()

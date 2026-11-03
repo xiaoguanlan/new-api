@@ -136,6 +136,10 @@ type RelayInfo struct {
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
 	ForcePreConsume bool
+	// PostPaidTask 为 true 时该异步任务不冻结额度：提交前只校验余额，
+	// 任务完成后按实测用量一次性扣费，因此全程只产生一条消费日志。
+	// 由 quota_setting.post_paid_task_models 按模型名开启。
+	PostPaidTask bool
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 初始免费组可为 nil；若 auto 重试切换到付费组，会在发送前创建。
 	Billing BillingSettler

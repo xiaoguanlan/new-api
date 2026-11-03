@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,10 +17,34 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	relaykittypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
+
+// AdmitPostPaidTask 为「完成后才扣费」的任务把关：只校验余额是否覆盖本次预估额度，
+// 不冻结任何额度。后付费任务的资金在完成时按实测用量一次性扣减（见
+// RecalculateTaskQuota），所以提交阶段必须自己把住准入，否则余额为零的用户也能提交。
+// 注意：这里只看钱包余额，纯订阅用户会被拒绝。
+func AdmitPostPaidTask(c *gin.Context, info *relaycommon.RelayInfo, estimatedQuota int) *relaykittypes.NewAPIError {
+	if estimatedQuota <= 0 {
+		return nil
+	}
+	userQuota, err := model.GetUserQuota(info.UserId, false)
+	if err != nil {
+		return relaykittypes.NewError(err, relaykittypes.ErrorCodeQueryDataError, relaykittypes.ErrOptionWithSkipRetry())
+	}
+	info.UserQuota = userQuota
+	if userQuota < estimatedQuota {
+		return relaykittypes.NewErrorWithStatusCode(
+			fmt.Errorf("insufficient quota for this task: estimated %d, remaining %d; post-paid tasks are charged once the task finishes", estimatedQuota, userQuota),
+			relaykittypes.ErrorCodeInsufficientUserQuota,
+			http.StatusForbidden,
+			relaykittypes.ErrOptionWithSkipRetry())
+	}
+	return nil
+}
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
